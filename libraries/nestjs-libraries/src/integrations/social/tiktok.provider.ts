@@ -904,9 +904,10 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         }
       }
 
-      // Get recent videos and aggregate their stats
+      // One call is enough: video/list returns the statistics alongside the
+      // ids, so there is no need to list then query.
       const videoListResponse = await fetch(
-        'https://open.tiktokapis.com/v2/video/list/?fields=id',
+        'https://open.tiktokapis.com/v2/video/list/?fields=id,title,cover_image_url,share_url,create_time,view_count,like_count,comment_count,share_count',
         {
           method: 'POST',
           headers: {
@@ -918,92 +919,91 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       );
 
       const videoListData = await videoListResponse.json();
-      const videos = videoListData?.data?.videos;
+      const videoDetails = videoListData?.data?.videos;
 
-      if (videos && videos.length > 0) {
-        const videoIds = videos.map((v: { id: string }) => v.id);
+      if (videoDetails && videoDetails.length > 0) {
+        let totalViews = 0;
+        let totalLikes = 0;
+        let totalComments = 0;
+        let totalShares = 0;
 
-        // Query video details to get engagement metrics
-        const videoQueryResponse = await fetch(
-          'https://open.tiktokapis.com/v2/video/query/?fields=id,like_count,comment_count,share_count,view_count',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify({
-              filters: { video_ids: videoIds },
-            }),
-          }
-        );
+        for (const video of videoDetails) {
+          totalViews += video.view_count || 0;
+          totalLikes += video.like_count || 0;
+          totalComments += video.comment_count || 0;
+          totalShares += video.share_count || 0;
+        }
 
-        const videoQueryData = await videoQueryResponse.json();
-        const videoDetails = videoQueryData?.data?.videos;
+        // These four aggregate the sliding window fetched above, not the
+        // lifetime account counters pushed earlier. The label says so, since
+        // both families end up side by side in the same grid.
+        const windowSize = videoDetails.length;
 
-        if (videoDetails && videoDetails.length > 0) {
-          let totalViews = 0;
-          let totalLikes = 0;
-          let totalComments = 0;
-          let totalShares = 0;
+        result.push({
+          label: `Views (last ${windowSize} videos)`,
+          percentageChange: 0,
+          data: [{ total: String(totalViews), date: today }],
+        });
 
-          for (const video of videoDetails) {
-            totalViews += video.view_count || 0;
-            totalLikes += video.like_count || 0;
-            totalComments += video.comment_count || 0;
-            totalShares += video.share_count || 0;
-          }
+        result.push({
+          label: `Likes (last ${windowSize} videos)`,
+          percentageChange: 0,
+          data: [{ total: String(totalLikes), date: today }],
+        });
 
-          // These four aggregate the sliding window fetched above, not the
-          // lifetime account counters pushed earlier. The label says so, since
-          // both families end up side by side in the same grid.
-          const windowSize = videoDetails.length;
+        result.push({
+          label: `Comments (last ${windowSize} videos)`,
+          percentageChange: 0,
+          data: [{ total: String(totalComments), date: today }],
+        });
 
-          result.push({
-            label: `Views (last ${windowSize} videos)`,
-            percentageChange: 0,
-            data: [{ total: String(totalViews), date: today }],
-          });
+        result.push({
+          label: `Shares (last ${windowSize} videos)`,
+          percentageChange: 0,
+          data: [{ total: String(totalShares), date: today }],
+        });
 
-          result.push({
-            label: `Likes (last ${windowSize} videos)`,
-            percentageChange: 0,
-            data: [{ total: String(totalLikes), date: today }],
-          });
+        if (totalViews > 0) {
+          const engagementRate =
+            ((totalLikes + totalComments + totalShares) / totalViews) * 100;
 
           result.push({
-            label: `Comments (last ${windowSize} videos)`,
-            percentageChange: 0,
-            data: [{ total: String(totalComments), date: today }],
-          });
-
-          result.push({
-            label: `Shares (last ${windowSize} videos)`,
-            percentageChange: 0,
-            data: [{ total: String(totalShares), date: today }],
-          });
-
-          if (totalViews > 0) {
-            const engagementRate =
-              ((totalLikes + totalComments + totalShares) / totalViews) * 100;
-
-            result.push({
-              label: 'Engagement Rate',
-              average: true,
-              percentageChange: 0,
-              data: [{ total: engagementRate.toFixed(2), date: today }],
-            });
-          }
-
-          result.push({
-            label: 'Avg. Views per Video',
+            label: 'Engagement Rate',
             average: true,
             percentageChange: 0,
-            data: [
-              { total: String(Math.round(totalViews / windowSize)), date: today },
-            ],
+            data: [{ total: engagementRate.toFixed(2), date: today }],
           });
         }
+
+        result.push({
+          label: 'Avg. Views per Video',
+          average: true,
+          percentageChange: 0,
+          data: [
+            { total: String(Math.round(totalViews / windowSize)), date: today },
+          ],
+        });
+
+        result.push({
+          label: 'Recent Videos',
+          data: [],
+          videos: [...videoDetails]
+            .sort(
+              (a: any, b: any) => (b.create_time || 0) - (a.create_time || 0)
+            )
+            .slice(0, 10)
+            .map((video: any) => ({
+              id: String(video.id),
+              title: video.title || 'Untitled',
+              url: video.share_url,
+              thumbnail: video.cover_image_url,
+              // TikTok hands back seconds since epoch, not milliseconds.
+              date: new Date((video.create_time || 0) * 1000).toISOString(),
+              views: video.view_count || 0,
+              likes: video.like_count || 0,
+              comments: video.comment_count || 0,
+            })),
+        });
       }
 
       return result;

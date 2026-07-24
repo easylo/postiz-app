@@ -550,7 +550,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       const endDate = dayjs().format('YYYY-MM-DD');
       const startDate = dayjs().subtract(date, 'day').format('YYYY-MM-DD');
 
-      const { client, youtubeAnalytics } = clientAndYoutube();
+      const { client, youtubeAnalytics, youtube } = clientAndYoutube();
       client.setCredentials({ access_token: accessToken });
 
       const youtubeClient = youtubeAnalytics(client);
@@ -698,6 +698,62 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         if (breakdown.length) {
           acc.push({ label, data: [], breakdown });
         }
+      }
+
+      // Per-video rows. Going through the channel's uploads playlist costs one
+      // quota unit per call, where search.list would cost a hundred for the
+      // same list.
+      try {
+        const dataClient = youtube(client);
+
+        const { data: channel } = await dataClient.channels.list({
+          part: ['contentDetails'],
+          mine: true,
+        });
+
+        const uploads =
+          channel?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+
+        if (uploads) {
+          const { data: items } = await dataClient.playlistItems.list({
+            part: ['contentDetails'],
+            playlistId: uploads,
+            maxResults: 10,
+          });
+
+          const ids = (items?.items || [])
+            .map((i) => i?.contentDetails?.videoId)
+            .filter(Boolean) as string[];
+
+          if (ids.length) {
+            const { data: details } = await dataClient.videos.list({
+              part: ['snippet', 'statistics'],
+              id: ids,
+            });
+
+            const videos = (details?.items || []).map((video) => ({
+              id: String(video.id),
+              title: video.snippet?.title || 'Untitled',
+              url: `https://www.youtube.com/watch?v=${video.id}`,
+              thumbnail:
+                video.snippet?.thumbnails?.medium?.url ||
+                video.snippet?.thumbnails?.default?.url ||
+                undefined,
+              date: video.snippet?.publishedAt || '',
+              // Counters are hidden on some videos; treat a missing one as 0
+              // rather than dropping the row.
+              views: Number(video.statistics?.viewCount) || 0,
+              likes: Number(video.statistics?.likeCount) || 0,
+              comments: Number(video.statistics?.commentCount) || 0,
+            }));
+
+            if (videos.length) {
+              acc.push({ label: 'Recent Videos', data: [], videos });
+            }
+          }
+        }
+      } catch (e) {
+        // The channel-level metrics are worth showing even without the list.
       }
 
       return acc;

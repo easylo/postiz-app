@@ -70,6 +70,20 @@ export interface AnalyticsData {
    * a series to chart or a breakdown to rank, never both.
    */
   breakdown?: Array<{ key: string; value: number }>;
+  /**
+   * Per-video rows rather than an aggregate. Mutually exclusive with `data` and
+   * `breakdown`: a metric carries a series, a ranking or a list, never two.
+   */
+  videos?: Array<{
+    id: string;
+    title: string;
+    url?: string;
+    thumbnail?: string;
+    date: string;
+    views: number;
+    likes: number;
+    comments: number;
+  }>;
 }
 
 

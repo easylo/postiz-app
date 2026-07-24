@@ -12,7 +12,84 @@ interface AnalyticsDataItem {
   average?: boolean;
   percentageChange?: number;
   breakdown?: Array<{ key: string; value: number }>;
+  videos?: Array<{
+    id: string;
+    title: string;
+    url?: string;
+    thumbnail?: string;
+    date: string;
+    views: number;
+    likes: number;
+    comments: number;
+  }>;
 }
+
+const VideoTable: FC<{ videos: NonNullable<AnalyticsDataItem['videos']> }> = ({
+  videos,
+}) => {
+  const format = (value: number) => value.toLocaleString();
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[14px]">
+        <thead>
+          <tr className="text-newTableText text-[13px] text-left">
+            <th className="font-medium py-[8px] pr-[12px]">Video</th>
+            <th className="font-medium py-[8px] px-[12px] whitespace-nowrap">
+              Published
+            </th>
+            <th className="font-medium py-[8px] px-[12px] text-right">Views</th>
+            <th className="font-medium py-[8px] px-[12px] text-right">Likes</th>
+            <th className="font-medium py-[8px] pl-[12px] text-right">
+              Comments
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {videos.map((video) => (
+            <tr key={video.id} className="border-t border-newTableBorder">
+              <td className="py-[10px] pr-[12px]">
+                <div className="flex items-center gap-[10px] min-w-[220px]">
+                  {video.thumbnail && (
+                    <img
+                      src={video.thumbnail}
+                      alt=""
+                      className="w-[64px] h-[36px] object-cover rounded-[4px] flex-none"
+                    />
+                  )}
+                  {video.url ? (
+                    <a
+                      href={video.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover:underline line-clamp-2"
+                    >
+                      {video.title}
+                    </a>
+                  ) : (
+                    <span className="line-clamp-2">{video.title}</span>
+                  )}
+                </div>
+              </td>
+              <td className="py-[10px] px-[12px] text-newTableText whitespace-nowrap">
+                {video.date ? new Date(video.date).toLocaleDateString() : '—'}
+              </td>
+              <td className="py-[10px] px-[12px] text-right tabular-nums">
+                {format(video.views)}
+              </td>
+              <td className="py-[10px] px-[12px] text-right tabular-nums">
+                {format(video.likes)}
+              </td>
+              <td className="py-[10px] pl-[12px] text-right tabular-nums">
+                {format(video.comments)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 const BreakdownList: FC<{
   entries: Array<{ key: string; value: number }>;
@@ -95,7 +172,8 @@ const AnalyticsCard: FC<{
   const hasDataPoints = item.data.length >= 1;
 
   return (
-    <div className="group relative">
+    // A table needs the full row: three-column cards are far too narrow for it.
+    <div className={`group relative ${item.videos?.length ? 'col-span-full' : ''}`}>
       <div
         className={`
           flex flex-col h-full
@@ -128,7 +206,11 @@ const AnalyticsCard: FC<{
         </div>
 
         {/* Content */}
-        {item.breakdown?.length ? (
+        {item.videos?.length ? (
+          <div className="px-[16px] pb-[14px]">
+            <VideoTable videos={item.videos} />
+          </div>
+        ) : item.breakdown?.length ? (
           <BreakdownList entries={item.breakdown} color={color} />
         ) : hasDataPoints ? (
           <>

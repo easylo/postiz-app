@@ -559,7 +559,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         startDate,
         endDate,
         metrics:
-          'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,likes,subscribersLost',
+          'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,likes,subscribersLost,comments,shares,videosAddedToPlaylists',
         dimensions: 'day',
         sort: 'day',
       });
@@ -573,6 +573,14 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       });
 
       const acc = [] as any[];
+      acc.push({
+        label: 'Views',
+        data: mappedData?.map((p: any) => ({
+          total: p.views,
+          date: p.day,
+        })),
+      });
+
       acc.push({
         label: 'Estimated Minutes Watched',
         data: mappedData?.map((p: any) => ({
@@ -619,6 +627,30 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         label: 'Likes',
         data: mappedData?.map((p: any) => ({
           total: p.likes,
+          date: p.day,
+        })),
+      });
+
+      acc.push({
+        label: 'Comments',
+        data: mappedData?.map((p: any) => ({
+          total: p.comments,
+          date: p.day,
+        })),
+      });
+
+      acc.push({
+        label: 'Shares',
+        data: mappedData?.map((p: any) => ({
+          total: p.shares,
+          date: p.day,
+        })),
+      });
+
+      acc.push({
+        label: 'Added to Playlists',
+        data: mappedData?.map((p: any) => ({
+          total: p.videosAddedToPlaylists,
           date: p.day,
         })),
       });

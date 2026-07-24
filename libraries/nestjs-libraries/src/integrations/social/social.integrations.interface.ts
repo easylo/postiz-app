@@ -53,7 +53,17 @@ export interface IAuthenticator {
 export interface AnalyticsData {
   label: string;
   data: Array<{ total: string; date: string }>;
-  percentageChange: number;
+  /**
+   * Set when the metric is already a rate or an average rather than a counter.
+   * Changes how the variation is computed (difference in points instead of a
+   * relative percentage) and how the UI labels it (`pp` instead of `%`).
+   */
+  average?: boolean;
+  /**
+   * Computed centrally from `data` in IntegrationService.checkAnalytics.
+   * Providers do not need to set it.
+   */
+  percentageChange?: number;
 }
 
 

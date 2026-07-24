@@ -954,28 +954,54 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
             totalShares += video.share_count || 0;
           }
 
+          // These four aggregate the sliding window fetched above, not the
+          // lifetime account counters pushed earlier. The label says so, since
+          // both families end up side by side in the same grid.
+          const windowSize = videoDetails.length;
+
           result.push({
-            label: 'Views',
+            label: `Views (last ${windowSize} videos)`,
             percentageChange: 0,
             data: [{ total: String(totalViews), date: today }],
           });
 
           result.push({
-            label: 'Recent Likes',
+            label: `Likes (last ${windowSize} videos)`,
             percentageChange: 0,
             data: [{ total: String(totalLikes), date: today }],
           });
 
           result.push({
-            label: 'Recent Comments',
+            label: `Comments (last ${windowSize} videos)`,
             percentageChange: 0,
             data: [{ total: String(totalComments), date: today }],
           });
 
           result.push({
-            label: 'Recent Shares',
+            label: `Shares (last ${windowSize} videos)`,
             percentageChange: 0,
             data: [{ total: String(totalShares), date: today }],
+          });
+
+          if (totalViews > 0) {
+            const engagementRate =
+              ((totalLikes + totalComments + totalShares) / totalViews) * 100;
+
+            result.push({
+              label: 'Engagement Rate',
+              average: true,
+              percentageChange: 0,
+              data: [{ total: engagementRate.toFixed(2), date: today }],
+            });
+          }
+
+          result.push({
+            label: 'Avg. Views per Video',
+            average: true,
+            percentageChange: 0,
+            data: [
+              { total: String(Math.round(totalViews / windowSize)), date: today },
+            ],
           });
         }
       }

@@ -28,6 +28,48 @@ import { TemporalService } from 'nestjs-temporal-core';
 
 dayjs.extend(utc);
 
+/**
+ * Fills in `percentageChange` for every metric, comparing the first half of the
+ * series against the second one.
+ *
+ * Providers used to hardcode this value (0, and 5 for a few of them), so the
+ * trend arrow in the UI was decorative. Computing it here keeps it generic: any
+ * provider returning at least two data points gets a real trend, with no
+ * provider-specific code.
+ *
+ * Rates and averages (`average: true`) are compared as means and the result is
+ * a difference in points, which is what the UI renders as `pp`. Counters are
+ * compared as sums and the result is a relative percentage.
+ */
+const withPercentageChange = (analytics: AnalyticsData[]): AnalyticsData[] =>
+  (analytics || []).map((metric) => {
+    const points = (metric?.data || [])
+      .map((p) => Number(p?.total))
+      .filter((n) => !isNaN(n));
+
+    if (points.length < 2) {
+      return { ...metric, percentageChange: 0 };
+    }
+
+    const middle = Math.floor(points.length / 2);
+    const first = points.slice(0, middle);
+    const second = points.slice(middle);
+
+    const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+
+    const before = metric.average ? sum(first) / first.length : sum(first);
+    const after = metric.average ? sum(second) / second.length : sum(second);
+
+    // A rate moves in points; a counter moves relative to where it started.
+    const change = metric.average
+      ? after - before
+      : before === 0
+      ? 0
+      : ((after - before) / before) * 100;
+
+    return { ...metric, percentageChange: Math.round(change * 10) / 10 };
+  });
+
 @Injectable()
 export class IntegrationService {
   private storage = UploadFactory.createStorage();
@@ -380,10 +422,12 @@ export class IntegrationService {
 
     if (integrationProvider.analytics) {
       try {
-        const loadAnalytics = await integrationProvider.analytics(
-          getIntegration.internalId,
-          getIntegration.token,
-          +date
+        const loadAnalytics = withPercentageChange(
+          await integrationProvider.analytics(
+            getIntegration.internalId,
+            getIntegration.token,
+            +date
+          )
         );
         await ioRedis.set(
           `integration:${org.id}:${integration}:${date}`,

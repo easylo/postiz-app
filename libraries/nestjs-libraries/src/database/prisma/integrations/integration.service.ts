@@ -73,6 +73,7 @@ const withPercentageChange = (analytics: AnalyticsData[]): AnalyticsData[] =>
 @Injectable()
 export class IntegrationService {
   private storage = UploadFactory.createStorage();
+
   constructor(
     private _integrationRepository: IntegrationRepository,
     private _autopostsRepository: AutopostRepository,
@@ -82,6 +83,63 @@ export class IntegrationService {
     private _refreshIntegrationService: RefreshIntegrationService,
     private _temporalService: TemporalService
   ) {}
+
+  /**
+   * Gives a history to providers that only expose current counters.
+   *
+   * Such providers return a single data point, which cannot be charted and
+   * leaves the trend at zero forever. We record that point once a day and
+   * stitch the stored ones back in, so the metric builds up a series from the
+   * first read onwards. Metrics that already carry a real time series — YouTube
+   * and the like — have more than one point and are handed back untouched.
+   *
+   * History is a nicety: a failure here must never break an analytics read.
+   */
+  private async mergeAnalyticsHistory(
+    integrationId: string,
+    analytics: AnalyticsData[],
+    days: number
+  ): Promise<AnalyticsData[]> {
+    const snapshots = (analytics || []).filter((m) => m?.data?.length === 1);
+    if (!snapshots.length) {
+      return analytics;
+    }
+
+    try {
+      await this._integrationRepository.saveAnalyticsSnapshot(
+        integrationId,
+        snapshots.map((m) => ({
+          label: m.label,
+          date: m.data[0].date,
+          total: m.data[0].total,
+        }))
+      );
+
+      const history = await this._integrationRepository.getAnalyticsHistory(
+        integrationId,
+        dayjs().subtract(days, 'day').format('YYYY-MM-DD')
+      );
+
+      return analytics.map((metric) => {
+        if (metric?.data?.length !== 1) {
+          return metric;
+        }
+
+        const today = metric.data[0].date;
+        const data = [
+          // The live value wins for today; stored rows only fill in the past.
+          ...history
+            .filter((h) => h.label === metric.label && h.date !== today)
+            .map(({ date, total }) => ({ date, total })),
+          ...metric.data,
+        ].sort((a, b) => a.date.localeCompare(b.date));
+
+        return { ...metric, data };
+      });
+    } catch (e) {
+      return analytics;
+    }
+  }
 
   async changeActiveCron(orgId: string) {
     const data = await this._autopostsRepository.getAutoposts(orgId);
@@ -423,9 +481,13 @@ export class IntegrationService {
     if (integrationProvider.analytics) {
       try {
         const loadAnalytics = withPercentageChange(
-          await integrationProvider.analytics(
-            getIntegration.internalId,
-            getIntegration.token,
+          await this.mergeAnalyticsHistory(
+            getIntegration.id,
+            await integrationProvider.analytics(
+              getIntegration.internalId,
+              getIntegration.token,
+              +date
+            ),
             +date
           )
         );

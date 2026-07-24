@@ -16,8 +16,39 @@ export class IntegrationRepository {
     private _plugs: PrismaRepository<'plugs'>,
     private _exisingPlugData: PrismaRepository<'exisingPlugData'>,
     private _customers: PrismaRepository<'customer'>,
-    private _mentions: PrismaRepository<'mentions'>
+    private _mentions: PrismaRepository<'mentions'>,
+    private _analyticsHistory: PrismaRepository<'integrationAnalytics'>
   ) {}
+
+  /**
+   * Stores one value per metric per day, so providers exposing only current
+   * counters can still be charted over time. Re-reading the same day overwrites
+   * the value rather than piling rows up.
+   */
+  saveAnalyticsSnapshot(
+    integrationId: string,
+    snapshot: { label: string; date: string; total: string }[]
+  ) {
+    return Promise.all(
+      snapshot.map(({ label, date, total }) =>
+        this._analyticsHistory.model.integrationAnalytics.upsert({
+          where: {
+            integrationId_label_date: { integrationId, label, date },
+          },
+          create: { integrationId, label, date, total },
+          update: { total },
+        })
+      )
+    );
+  }
+
+  getAnalyticsHistory(integrationId: string, since: string) {
+    return this._analyticsHistory.model.integrationAnalytics.findMany({
+      where: { integrationId, date: { gte: since } },
+      orderBy: { date: 'asc' },
+      select: { label: true, date: true, total: true },
+    });
+  }
 
   getMentions(platform: string, q: string) {
     return this._mentions.model.mentions.findMany({

@@ -341,6 +341,7 @@ model Integration {
   orderItems            OrderItems[]
   plugs                 Plugs[]
   posts                 Post[]
+  analyticsHistory      IntegrationAnalytics[]
 
   @@unique([organizationId, internalId])
   @@index([rootInternalId])
@@ -967,4 +968,26 @@ model Announcement {
   description String
   color       AnnouncementColor @default(INFO)
   createdAt   DateTime          @default(now())
+}
+
+// Daily snapshots of provider metrics that come back as a single point.
+//
+// Some APIs (TikTok's Display API among them) only expose current counters and
+// no history at all, so a chart is impossible without keeping our own record.
+// Rows are written on every analytics read, at most one per metric per day,
+// and only for metrics the provider returned as a single data point — real
+// time series such as YouTube's are left untouched.
+model IntegrationAnalytics {
+  id            String      @id @default(cuid())
+  integrationId String
+  label         String
+  // YYYY-MM-DD, matching the shape used by AnalyticsData
+  date          String
+  total         String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime?   @updatedAt
+  integration   Integration @relation(fields: [integrationId], references: [id])
+
+  @@unique([integrationId, label, date])
+  @@index([integrationId, date])
 }

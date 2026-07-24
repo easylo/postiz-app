@@ -64,6 +64,12 @@ export interface AnalyticsData {
    * Providers do not need to set it.
    */
   percentageChange?: number;
+  /**
+   * Ranked distribution rather than a time series — top countries, traffic
+   * sources, devices. Mutually exclusive with `data`: a metric carries either
+   * a series to chart or a breakdown to rank, never both.
+   */
+  breakdown?: Array<{ key: string; value: number }>;
 }
 
 

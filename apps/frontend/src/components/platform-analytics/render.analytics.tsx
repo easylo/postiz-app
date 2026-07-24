@@ -11,7 +11,43 @@ interface AnalyticsDataItem {
   data: Array<{ total: number; date: string }>;
   average?: boolean;
   percentageChange?: number;
+  breakdown?: Array<{ key: string; value: number }>;
 }
+
+const BreakdownList: FC<{
+  entries: Array<{ key: string; value: number }>;
+  color: 'purple' | 'green' | 'blue';
+}> = ({ entries, color }) => {
+  const max = Math.max(...entries.map((e) => e.value), 1);
+
+  return (
+    <div className="flex-1 flex flex-col gap-[10px] px-[16px] py-[12px]">
+      {entries.map((entry) => (
+        <div key={entry.key} className="flex flex-col gap-[4px]">
+          <div className="flex items-center justify-between text-[13px]">
+            <span className="text-newTableText truncate pr-[8px]">
+              {entry.key}
+            </span>
+            <span className="font-medium tabular-nums">
+              {entry.value.toLocaleString()}
+            </span>
+          </div>
+          <div className="h-[6px] rounded-full bg-newTableBorder overflow-hidden">
+            <div
+              className={`
+                h-full rounded-full
+                ${color === 'purple' ? 'bg-[#612bd3]' : ''}
+                ${color === 'green' ? 'bg-[#32d583]' : ''}
+                ${color === 'blue' ? 'bg-[#1d9bf0]' : ''}
+              `}
+              style={{ width: `${(entry.value / max) * 100}%` }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const TrendIndicator: FC<{ value: number; average?: boolean }> = ({
   value,
@@ -92,7 +128,9 @@ const AnalyticsCard: FC<{
         </div>
 
         {/* Content */}
-        {hasDataPoints ? (
+        {item.breakdown?.length ? (
+          <BreakdownList entries={item.breakdown} color={color} />
+        ) : hasDataPoints ? (
           <>
             {/* Chart */}
             <div className="flex-1 px-[12px] py-[8px]">

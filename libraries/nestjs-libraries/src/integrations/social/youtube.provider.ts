@@ -655,6 +655,51 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         })),
       });
 
+      // Distributions rather than series: where the views came from, and from
+      // what. Each needs its own query since the API allows a single dimension
+      // per report. They are fetched together, and a dimension the channel has
+      // no data for is skipped rather than failing the whole screen.
+      const breakdownOf = async (dimension: string) => {
+        try {
+          const { data: report } = await youtubeClient.reports.query({
+            ids: 'channel==MINE',
+            startDate,
+            endDate,
+            metrics: 'views',
+            dimensions: dimension,
+            sort: '-views',
+            maxResults: 10,
+          });
+
+          return (report?.rows || [])
+            .map((row: any) => ({
+              key: String(row[0]),
+              value: Number(row[1]) || 0,
+            }))
+            .filter((entry) => entry.value > 0);
+        } catch (e) {
+          return [];
+        }
+      };
+
+      const [countries, sources, devices] = await Promise.all([
+        breakdownOf('country'),
+        breakdownOf('insightTrafficSourceType'),
+        breakdownOf('deviceType'),
+      ]);
+
+      const breakdowns: [string, { key: string; value: number }[]][] = [
+        ['Top Countries', countries],
+        ['Traffic Sources', sources],
+        ['Devices', devices],
+      ];
+
+      for (const [label, breakdown] of breakdowns) {
+        if (breakdown.length) {
+          acc.push({ label, data: [], breakdown });
+        }
+      }
+
       return acc;
     } catch (err) {
       return [];

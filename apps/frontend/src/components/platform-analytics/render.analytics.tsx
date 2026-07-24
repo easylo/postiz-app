@@ -24,10 +24,67 @@ interface AnalyticsDataItem {
   }>;
 }
 
+type VideoSortKey = 'date' | 'views' | 'likes' | 'comments';
+
+const SortableHeader: FC<{
+  label: string;
+  sortBy: VideoSortKey;
+  active: VideoSortKey;
+  ascending: boolean;
+  onSort: (key: VideoSortKey) => void;
+  className?: string;
+}> = ({ label, sortBy, active, ascending, onSort, className = '' }) => (
+  <th className={`font-medium py-[8px] ${className}`}>
+    <button
+      type="button"
+      onClick={() => onSort(sortBy)}
+      className="inline-flex items-center gap-[4px] hover:text-white transition-colors"
+    >
+      {label}
+      <span
+        className={`text-[10px] ${
+          active === sortBy ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        {ascending ? '▲' : '▼'}
+      </span>
+    </button>
+  </th>
+);
+
 const VideoTable: FC<{ videos: NonNullable<AnalyticsDataItem['videos']> }> = ({
   videos,
 }) => {
   const format = (value: number) => value.toLocaleString();
+  // The provider already hands the rows back newest first; this is the same
+  // order, just made explicit so the header can toggle it.
+  const [sortKey, setSortKey] = useState<VideoSortKey>('date');
+  const [ascending, setAscending] = useState(false);
+
+  const toggle = useCallback(
+    (key: VideoSortKey) => {
+      if (key === sortKey) {
+        setAscending((current) => !current);
+        return;
+      }
+      setSortKey(key);
+      // A freshly picked column starts on its most useful end: biggest numbers
+      // and most recent dates first.
+      setAscending(false);
+    },
+    [sortKey]
+  );
+
+  const sorted = useMemo(() => {
+    const value = (video: (typeof videos)[number]) =>
+      sortKey === 'date' ? new Date(video.date).getTime() || 0 : video[sortKey];
+
+    return [...videos].sort((a, b) =>
+      ascending ? value(a) - value(b) : value(b) - value(a)
+    );
+  }, [videos, sortKey, ascending]);
+
+  const headerProps = { active: sortKey, ascending, onSort: toggle };
 
   return (
     <div className="overflow-x-auto">
@@ -35,18 +92,34 @@ const VideoTable: FC<{ videos: NonNullable<AnalyticsDataItem['videos']> }> = ({
         <thead>
           <tr className="text-newTableText text-[13px] text-left">
             <th className="font-medium py-[8px] pr-[12px]">Video</th>
-            <th className="font-medium py-[8px] px-[12px] whitespace-nowrap">
-              Published
-            </th>
-            <th className="font-medium py-[8px] px-[12px] text-right">Views</th>
-            <th className="font-medium py-[8px] px-[12px] text-right">Likes</th>
-            <th className="font-medium py-[8px] pl-[12px] text-right">
-              Comments
-            </th>
+            <SortableHeader
+              label="Published"
+              sortBy="date"
+              className="px-[12px] whitespace-nowrap"
+              {...headerProps}
+            />
+            <SortableHeader
+              label="Views"
+              sortBy="views"
+              className="px-[12px] text-right"
+              {...headerProps}
+            />
+            <SortableHeader
+              label="Likes"
+              sortBy="likes"
+              className="px-[12px] text-right"
+              {...headerProps}
+            />
+            <SortableHeader
+              label="Comments"
+              sortBy="comments"
+              className="pl-[12px] text-right"
+              {...headerProps}
+            />
           </tr>
         </thead>
         <tbody>
-          {videos.map((video) => (
+          {sorted.map((video) => (
             <tr key={video.id} className="border-t border-newTableBorder">
               <td className="py-[10px] pr-[12px]">
                 <div className="flex items-center gap-[10px] min-w-[220px]">
@@ -148,10 +221,7 @@ const TrendIndicator: FC<{ value: number; average?: boolean }> = ({
         fill="none"
         className={isPositive ? '' : 'rotate-180'}
       >
-        <path
-          d="M6 2.5L10 7.5H2L6 2.5Z"
-          fill="currentColor"
-        />
+        <path d="M6 2.5L10 7.5H2L6 2.5Z" fill="currentColor" />
       </svg>
       <span>
         {displayValue}
@@ -173,7 +243,9 @@ const AnalyticsCard: FC<{
 
   return (
     // A table needs the full row: three-column cards are far too narrow for it.
-    <div className={`group relative ${item.videos?.length ? 'col-span-full' : ''}`}>
+    <div
+      className={`group relative ${item.videos?.length ? 'col-span-full' : ''}`}
+    >
       <div
         className={`
           flex flex-col h-full
@@ -201,7 +273,10 @@ const AnalyticsCard: FC<{
             </span>
           </div>
           {item.percentageChange !== undefined && (
-            <TrendIndicator value={item.percentageChange} average={item.average} />
+            <TrendIndicator
+              value={item.percentageChange}
+              average={item.average}
+            />
           )}
         </div>
 
@@ -217,7 +292,11 @@ const AnalyticsCard: FC<{
             {/* Chart */}
             <div className="flex-1 px-[12px] py-[8px]">
               <div className="h-[120px] relative">
-                <ChartSocial data={item.data} color={color} key={`chart-${index}`} />
+                <ChartSocial
+                  data={item.data}
+                  color={color}
+                  key={`chart-${index}`}
+                />
               </div>
             </div>
 
@@ -339,8 +418,10 @@ export const RenderAnalytics: FC<{
   const totals = useMemo(() => {
     return data?.map((p: AnalyticsDataItem) => {
       const value =
-        (p?.data.reduce((acc: number, curr: { total: number }) => acc + curr.total, 0) || 0) /
-        (p.average ? p.data.length : 1);
+        (p?.data.reduce(
+          (acc: number, curr: { total: number }) => acc + curr.total,
+          0
+        ) || 0) / (p.average ? p.data.length : 1);
       if (p.average) {
         return value.toFixed(2) + '%';
       }

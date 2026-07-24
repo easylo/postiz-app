@@ -207,11 +207,19 @@ export class PostsService {
     // }
 
     try {
-      const loadAnalytics = await integrationProvider.postAnalytics(
-        getIntegration.internalId,
-        getIntegration.token,
-        post.releaseId,
-        date
+      // Same treatment as channel analytics: providers hand back a single
+      // point, so the history is what turns it into a chart and a real trend.
+      // `post.id` keeps these rows apart from the channel-wide ones.
+      const loadAnalytics = await this._integrationService.enrichAnalytics(
+        getIntegration.id,
+        await integrationProvider.postAnalytics(
+          getIntegration.internalId,
+          getIntegration.token,
+          post.releaseId,
+          date
+        ),
+        date,
+        post.id
       );
       await ioRedis.set(
         `integration:${orgId}:${post.id}:${date}`,

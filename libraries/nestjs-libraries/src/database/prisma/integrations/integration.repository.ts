@@ -27,24 +27,49 @@ export class IntegrationRepository {
    */
   saveAnalyticsSnapshot(
     integrationId: string,
-    snapshot: { label: string; date: string; total: string }[]
+    snapshot: { label: string; date: string; total: string }[],
+    postId = ''
   ) {
     return Promise.all(
       snapshot.map(({ label, date, total }) =>
         this._analyticsHistory.model.integrationAnalytics.upsert({
           where: {
-            integrationId_label_date: { integrationId, label, date },
+            integrationId_postId_label_date: {
+              integrationId,
+              postId,
+              label,
+              date,
+            },
           },
-          create: { integrationId, label, date, total },
+          create: { integrationId, postId, label, date, total },
           update: { total },
         })
       )
     );
   }
 
-  getAnalyticsHistory(integrationId: string, since: string) {
+  /** Social integrations healthy enough to be polled by the snapshot job. */
+  getIntegrationsForAnalyticsSnapshot() {
+    return this._integration.model.integration.findMany({
+      where: {
+        type: 'social',
+        deletedAt: null,
+        disabled: false,
+        refreshNeeded: false,
+        inBetweenSteps: false,
+      },
+      select: {
+        id: true,
+        internalId: true,
+        token: true,
+        providerIdentifier: true,
+      },
+    });
+  }
+
+  getAnalyticsHistory(integrationId: string, since: string, postId = '') {
     return this._analyticsHistory.model.integrationAnalytics.findMany({
-      where: { integrationId, date: { gte: since } },
+      where: { integrationId, postId, date: { gte: since } },
       orderBy: { date: 'asc' },
       select: { label: true, date: true, total: true },
     });

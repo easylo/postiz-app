@@ -29,6 +29,12 @@ import { TemporalService } from 'nestjs-temporal-core';
 dayjs.extend(utc);
 
 /**
+ * Window the snapshot sweep asks providers for. It only needs today's value;
+ * a short window keeps the provider call cheap.
+ */
+const SNAPSHOT_WINDOW_DAYS = 7;
+
+/**
  * Fills in `percentageChange` for every metric, comparing the first half of the
  * series against the second one.
  *
@@ -98,7 +104,8 @@ export class IntegrationService {
   private async mergeAnalyticsHistory(
     integrationId: string,
     analytics: AnalyticsData[],
-    days: number
+    days: number,
+    postId = ''
   ): Promise<AnalyticsData[]> {
     const snapshots = (analytics || []).filter((m) => m?.data?.length === 1);
     if (!snapshots.length) {
@@ -112,12 +119,14 @@ export class IntegrationService {
           label: m.label,
           date: m.data[0].date,
           total: m.data[0].total,
-        }))
+        })),
+        postId
       );
 
       const history = await this._integrationRepository.getAnalyticsHistory(
         integrationId,
-        dayjs().subtract(days, 'day').format('YYYY-MM-DD')
+        dayjs().subtract(days, 'day').format('YYYY-MM-DD'),
+        postId
       );
 
       return analytics.map((metric) => {
@@ -138,6 +147,62 @@ export class IntegrationService {
       });
     } catch (e) {
       return analytics;
+    }
+  }
+
+  /**
+   * Records the history and fills in the trend, in that order — the variation
+   * has to be computed on the stitched series, not on the single point the
+   * provider just returned.
+   *
+   * Shared by channel-wide analytics and per-post ones; `postId` is what keeps
+   * the two sets of rows apart.
+   */
+  async enrichAnalytics(
+    integrationId: string,
+    analytics: AnalyticsData[],
+    days: number,
+    postId = ''
+  ): Promise<AnalyticsData[]> {
+    return withPercentageChange(
+      await this.mergeAnalyticsHistory(integrationId, analytics, days, postId)
+    );
+  }
+
+  /**
+   * Polls every healthy social integration so the history keeps growing on days
+   * nobody opens the analytics screen. Without it, a channel left alone for a
+   * week comes back with a week-long hole in its charts.
+   *
+   * One failing integration — expired token, provider outage — must not stop
+   * the sweep, so each is isolated.
+   */
+  async captureAnalyticsSnapshots() {
+    const integrations =
+      await this._integrationRepository.getIntegrationsForAnalyticsSnapshot();
+
+    for (const integration of integrations) {
+      try {
+        const provider = this._integrationManager.getSocialIntegration(
+          integration.providerIdentifier
+        );
+
+        if (!provider?.analytics) {
+          continue;
+        }
+
+        await this.enrichAnalytics(
+          integration.id,
+          await provider.analytics(
+            integration.internalId,
+            integration.token,
+            SNAPSHOT_WINDOW_DAYS
+          ),
+          SNAPSHOT_WINDOW_DAYS
+        );
+      } catch (e) {
+        // Nothing to do: the next run picks it up again.
+      }
     }
   }
 
@@ -480,16 +545,14 @@ export class IntegrationService {
 
     if (integrationProvider.analytics) {
       try {
-        const loadAnalytics = withPercentageChange(
-          await this.mergeAnalyticsHistory(
-            getIntegration.id,
-            await integrationProvider.analytics(
-              getIntegration.internalId,
-              getIntegration.token,
-              +date
-            ),
+        const loadAnalytics = await this.enrichAnalytics(
+          getIntegration.id,
+          await integrationProvider.analytics(
+            getIntegration.internalId,
+            getIntegration.token,
             +date
-          )
+          ),
+          +date
         );
         await ioRedis.set(
           `integration:${org.id}:${integration}:${date}`,

@@ -980,6 +980,10 @@ model Announcement {
 model IntegrationAnalytics {
   id            String      @id @default(cuid())
   integrationId String
+  // Empty for channel-wide metrics, set for per-post ones. Deliberately not
+  // nullable: Postgres does not treat NULLs as equal in a unique index, so a
+  // nullable column here would let duplicate channel rows through.
+  postId        String      @default("")
   label         String
   // YYYY-MM-DD, matching the shape used by AnalyticsData
   date          String
@@ -988,6 +992,6 @@ model IntegrationAnalytics {
   updatedAt     DateTime?   @updatedAt
   integration   Integration @relation(fields: [integrationId], references: [id])
 
-  @@unique([integrationId, label, date])
-  @@index([integrationId, date])
+  @@unique([integrationId, postId, label, date])
+  @@index([integrationId, postId, date])
 }

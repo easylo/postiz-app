@@ -28,6 +28,11 @@ export interface IAuthenticator {
     accessToken: string,
     date: number
   ): Promise<AnalyticsData[]>;
+  /**
+   * The per-video rows on their own. The hourly snapshot job calls this instead
+   * of `analytics`, which would drag along aggregate queries it has no use for.
+   */
+  videosAnalytics?(id: string, accessToken: string): Promise<AnalyticsVideo[]>;
   postAnalytics?(
     integrationId: string,
     accessToken: string,
@@ -50,6 +55,21 @@ export interface IAuthenticator {
   ): Promise<{ id: string; url: string }[]>;
 }
 
+/**
+ * One row of the per-video table. Named rather than inlined because the hourly
+ * snapshot job consumes it directly, without going through AnalyticsData.
+ */
+export type AnalyticsVideo = {
+  id: string;
+  title: string;
+  url?: string;
+  thumbnail?: string;
+  date: string;
+  views: number;
+  likes: number;
+  comments: number;
+};
+
 export interface AnalyticsData {
   label: string;
   data: Array<{ total: string; date: string }>;
@@ -71,19 +91,18 @@ export interface AnalyticsData {
    */
   breakdown?: Array<{ key: string; value: number }>;
   /**
-   * Per-video rows rather than an aggregate. Mutually exclusive with `data` and
-   * `breakdown`: a metric carries a series, a ranking or a list, never two.
+   * Per-video rows rather than an aggregate. Mutually exclusive with `data`,
+   * `breakdown` and `hourly`: a metric carries a series, a ranking, a list or a
+   * grid, never two.
    */
-  videos?: Array<{
-    id: string;
-    title: string;
-    url?: string;
-    thumbnail?: string;
-    date: string;
-    views: number;
-    likes: number;
-    comments: number;
-  }>;
+  videos?: AnalyticsVideo[];
+  /**
+   * Views gained hour by hour, summed over the tracked videos. The client turns
+   * it into a day-by-hour grid in its own timezone — which is why the raw
+   * series travels rather than a ready-made grid: a server-side axis rotation
+   * would be wrong for the timezones offset by half an hour.
+   */
+  hourly?: Array<{ at: string; value: number }>;
 }
 
 

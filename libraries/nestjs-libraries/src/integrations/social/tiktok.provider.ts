@@ -1,5 +1,6 @@
 import {
   AnalyticsData,
+  AnalyticsVideo,
   AuthTokenDetails,
   PostDetails,
   PostResponse,
@@ -846,6 +847,59 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     ];
   }
 
+  /**
+   * The ten most recent videos, as analytics rows.
+   *
+   * Split out because analytics() already holds the video/list response and
+   * must not fetch it twice, while the hourly job has nothing and must fetch it
+   * itself. One mapping, two callers.
+   */
+  private toAnalyticsVideos(videos: any[]): AnalyticsVideo[] {
+    return [...videos]
+      .sort((a: any, b: any) => (b.create_time || 0) - (a.create_time || 0))
+      .slice(0, 10)
+      .map((video: any) => ({
+        id: String(video.id),
+        title: video.title || 'Untitled',
+        url: video.share_url,
+        thumbnail: video.cover_image_url,
+        // TikTok hands back seconds since epoch, not milliseconds.
+        date: new Date((video.create_time || 0) * 1000).toISOString(),
+        views: video.view_count || 0,
+        likes: video.like_count || 0,
+        comments: video.comment_count || 0,
+      }));
+  }
+
+  /**
+   * One call is enough: video/list returns the statistics alongside the ids.
+   */
+  async videosAnalytics(
+    id: string,
+    accessToken: string
+  ): Promise<AnalyticsVideo[]> {
+    try {
+      const videoListResponse = await fetch(
+        'https://open.tiktokapis.com/v2/video/list/?fields=id,title,cover_image_url,share_url,create_time,view_count,like_count,comment_count,share_count',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ max_count: 20 }),
+        }
+      );
+
+      const videoListData = await videoListResponse.json();
+      const videos = videoListData?.data?.videos;
+
+      return videos?.length ? this.toAnalyticsVideos(videos) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
   async analytics(
     id: string,
     accessToken: string,
@@ -987,22 +1041,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         result.push({
           label: 'Recent Videos',
           data: [],
-          videos: [...videoDetails]
-            .sort(
-              (a: any, b: any) => (b.create_time || 0) - (a.create_time || 0)
-            )
-            .slice(0, 10)
-            .map((video: any) => ({
-              id: String(video.id),
-              title: video.title || 'Untitled',
-              url: video.share_url,
-              thumbnail: video.cover_image_url,
-              // TikTok hands back seconds since epoch, not milliseconds.
-              date: new Date((video.create_time || 0) * 1000).toISOString(),
-              views: video.view_count || 0,
-              likes: video.like_count || 0,
-              comments: video.comment_count || 0,
-            })),
+          videos: this.toAnalyticsVideos(videoDetails),
         });
       }
 

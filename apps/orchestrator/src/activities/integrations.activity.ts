@@ -17,6 +17,16 @@ export class IntegrationsActivity {
     return this._integrationService.getIntegrationById(orgId, id);
   }
 
+  @ActivityMethod()
+  async captureAnalyticsSnapshots() {
+    return this._integrationService.captureAnalyticsSnapshots();
+  }
+
+  @ActivityMethod()
+  async captureVideoAnalyticsSnapshots() {
+    return this._integrationService.captureVideoAnalyticsSnapshots();
+  }
+
   async refreshToken(integration: Integration) {
     return this._refreshIntegrationService.refresh(integration);
   }

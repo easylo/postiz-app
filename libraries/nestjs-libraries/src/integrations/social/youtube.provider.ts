@@ -1,5 +1,6 @@
 import {
   AnalyticsData,
+  AnalyticsVideo,
   AuthTokenDetails,
   PostDetails,
   PostResponse,
@@ -16,6 +17,7 @@ import {
   ValidityMedia,
 } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import * as process from 'node:process';
+import { Readable } from 'stream';
 import dayjs from 'dayjs';
 import { GaxiosResponse } from 'gaxios/build/src/common';
 import Schema$Video = youtube_v3.Schema$Video;
@@ -195,6 +197,14 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         type: 'bad-body',
         value:
           'We have uploaded your video but the thumbnail image is too wide.',
+      };
+    }
+
+    if (body.includes('captionExists')) {
+      return {
+        type: 'bad-body',
+        value:
+          'We have uploaded your video but a caption track for this language already exists.',
       };
     }
 
@@ -442,6 +452,9 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
               ...(settings?.tags?.length
                 ? { tags: settings.tags.map((p) => p.label) }
                 : {}),
+              ...(settings?.defaultLanguage
+                ? { defaultLanguage: settings.defaultLanguage }
+                : {}),
             },
             status: {
               privacyStatus: settings.type,
@@ -473,6 +486,52 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       );
     }
 
+    if (settings?.localizations?.length) {
+      await this.runInConcurrent(
+        async () =>
+          youtubeClient.videos.update({
+            part: ['localizations'],
+            requestBody: {
+              id: all?.data?.id!,
+              localizations: Object.fromEntries(
+                settings.localizations!.map((l) => [
+                  l.language,
+                  {
+                    title: l.title,
+                    ...(l.description ? { description: l.description } : {}),
+                  },
+                ])
+              ),
+            },
+          }),
+        true
+      );
+    }
+
+    if (settings?.captions?.length) {
+      for (const caption of settings.captions) {
+        await this.runInConcurrent(
+          async () =>
+            youtubeClient.captions.insert({
+              part: ['snippet'],
+              requestBody: {
+                snippet: {
+                  videoId: all?.data?.id!,
+                  language: caption.language,
+                  name: caption.name || '',
+                  isDraft: caption.isDraft ?? false,
+                },
+              },
+              media: {
+                mimeType: 'application/octet-stream',
+                body: Readable.from([caption.srt]),
+              },
+            }),
+          true
+        );
+      }
+    }
+
     return [
       {
         id: firstPost.id,
@@ -481,6 +540,70 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         status: 'success',
       },
     ];
+  }
+
+  /**
+   * Going through the channel's uploads playlist costs one quota unit per call,
+   * where search.list would cost a hundred for the same list.
+   */
+  async videosAnalytics(
+    id: string,
+    accessToken: string
+  ): Promise<AnalyticsVideo[]> {
+    try {
+      const { client, youtube } = clientAndYoutube();
+      client.setCredentials({ access_token: accessToken });
+      const dataClient = youtube(client);
+
+      const { data: channel } = await dataClient.channels.list({
+        part: ['contentDetails'],
+        mine: true,
+      });
+
+      const uploads =
+        channel?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+
+      if (!uploads) {
+        return [];
+      }
+
+      const { data: items } = await dataClient.playlistItems.list({
+        part: ['contentDetails'],
+        playlistId: uploads,
+        maxResults: 10,
+      });
+
+      const ids = (items?.items || [])
+        .map((i) => i?.contentDetails?.videoId)
+        .filter(Boolean) as string[];
+
+      if (!ids.length) {
+        return [];
+      }
+
+      const { data: details } = await dataClient.videos.list({
+        part: ['snippet', 'statistics'],
+        id: ids,
+      });
+
+      return (details?.items || []).map((video) => ({
+        id: String(video.id),
+        title: video.snippet?.title || 'Untitled',
+        url: `https://www.youtube.com/watch?v=${video.id}`,
+        thumbnail:
+          video.snippet?.thumbnails?.medium?.url ||
+          video.snippet?.thumbnails?.default?.url ||
+          undefined,
+        date: video.snippet?.publishedAt || '',
+        // Counters are hidden on some videos; treat a missing one as 0 rather
+        // than dropping the row.
+        views: Number(video.statistics?.viewCount) || 0,
+        likes: Number(video.statistics?.likeCount) || 0,
+        comments: Number(video.statistics?.commentCount) || 0,
+      }));
+    } catch (e) {
+      return [];
+    }
   }
 
   async analytics(
@@ -501,7 +624,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
         startDate,
         endDate,
         metrics:
-          'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,likes,subscribersLost',
+          'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,likes,subscribersLost,comments,shares,videosAddedToPlaylists',
         dimensions: 'day',
         sort: 'day',
       });
@@ -515,6 +638,14 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       });
 
       const acc = [] as any[];
+      acc.push({
+        label: 'Views',
+        data: mappedData?.map((p: any) => ({
+          total: p.views,
+          date: p.day,
+        })),
+      });
+
       acc.push({
         label: 'Estimated Minutes Watched',
         data: mappedData?.map((p: any) => ({
@@ -564,6 +695,82 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
           date: p.day,
         })),
       });
+
+      acc.push({
+        label: 'Comments',
+        data: mappedData?.map((p: any) => ({
+          total: p.comments,
+          date: p.day,
+        })),
+      });
+
+      acc.push({
+        label: 'Shares',
+        data: mappedData?.map((p: any) => ({
+          total: p.shares,
+          date: p.day,
+        })),
+      });
+
+      acc.push({
+        label: 'Added to Playlists',
+        data: mappedData?.map((p: any) => ({
+          total: p.videosAddedToPlaylists,
+          date: p.day,
+        })),
+      });
+
+      // Distributions rather than series: where the views came from, and from
+      // what. Each needs its own query since the API allows a single dimension
+      // per report. They are fetched together, and a dimension the channel has
+      // no data for is skipped rather than failing the whole screen.
+      const breakdownOf = async (dimension: string) => {
+        try {
+          const { data: report } = await youtubeClient.reports.query({
+            ids: 'channel==MINE',
+            startDate,
+            endDate,
+            metrics: 'views',
+            dimensions: dimension,
+            sort: '-views',
+            maxResults: 10,
+          });
+
+          return (report?.rows || [])
+            .map((row: any) => ({
+              key: String(row[0]),
+              value: Number(row[1]) || 0,
+            }))
+            .filter((entry) => entry.value > 0);
+        } catch (e) {
+          return [];
+        }
+      };
+
+      const [countries, sources, devices] = await Promise.all([
+        breakdownOf('country'),
+        breakdownOf('insightTrafficSourceType'),
+        breakdownOf('deviceType'),
+      ]);
+
+      const breakdowns: [string, { key: string; value: number }[]][] = [
+        ['Top Countries', countries],
+        ['Traffic Sources', sources],
+        ['Devices', devices],
+      ];
+
+      for (const [label, breakdown] of breakdowns) {
+        if (breakdown.length) {
+          acc.push({ label, data: [], breakdown });
+        }
+      }
+
+      // The channel-level metrics are worth showing even without the list, and
+      // videosAnalytics already swallows its own failures.
+      const videos = await this.videosAnalytics(id, accessToken);
+      if (videos.length) {
+        acc.push({ label: 'Recent Videos', data: [], videos });
+      }
 
       return acc;
     } catch (err) {

@@ -5,13 +5,56 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { ChartSocial } from '@gitroom/frontend/components/analytics/chart-social';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import {
+  VideoTable,
+  AnalyticsVideoRow,
+} from '@gitroom/frontend/components/platform-analytics/video.table';
+import { HeatmapGrid } from '@gitroom/frontend/components/platform-analytics/heatmap.grid';
 
 interface AnalyticsDataItem {
   label: string;
   data: Array<{ total: number; date: string }>;
   average?: boolean;
   percentageChange?: number;
+  breakdown?: Array<{ key: string; value: number }>;
+  videos?: AnalyticsVideoRow[];
+  hourly?: Array<{ at: string; value: number }>;
 }
+
+const BreakdownList: FC<{
+  entries: Array<{ key: string; value: number }>;
+  color: 'purple' | 'green' | 'blue';
+}> = ({ entries, color }) => {
+  const max = Math.max(...entries.map((e) => e.value), 1);
+
+  return (
+    <div className="flex-1 flex flex-col gap-[10px] px-[16px] py-[12px]">
+      {entries.map((entry) => (
+        <div key={entry.key} className="flex flex-col gap-[4px]">
+          <div className="flex items-center justify-between text-[13px]">
+            <span className="text-newTableText truncate pr-[8px]">
+              {entry.key}
+            </span>
+            <span className="font-medium tabular-nums">
+              {entry.value.toLocaleString()}
+            </span>
+          </div>
+          <div className="h-[6px] rounded-full bg-newTableBorder overflow-hidden">
+            <div
+              className={`
+                h-full rounded-full
+                ${color === 'purple' ? 'bg-[#612bd3]' : ''}
+                ${color === 'green' ? 'bg-[#32d583]' : ''}
+                ${color === 'blue' ? 'bg-[#1d9bf0]' : ''}
+              `}
+              style={{ width: `${(entry.value / max) * 100}%` }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const TrendIndicator: FC<{ value: number; average?: boolean }> = ({
   value,
@@ -35,10 +78,7 @@ const TrendIndicator: FC<{ value: number; average?: boolean }> = ({
         fill="none"
         className={isPositive ? '' : 'rotate-180'}
       >
-        <path
-          d="M6 2.5L10 7.5H2L6 2.5Z"
-          fill="currentColor"
-        />
+        <path d="M6 2.5L10 7.5H2L6 2.5Z" fill="currentColor" />
       </svg>
       <span>
         {displayValue}
@@ -52,14 +92,20 @@ const AnalyticsCard: FC<{
   item: AnalyticsDataItem;
   total: string | number;
   index: number;
-}> = ({ item, total, index }) => {
+  integrationId: string;
+}> = ({ item, total, index, integrationId }) => {
   const colorVariants = ['purple', 'green', 'blue'] as const;
   const color = colorVariants[index % colorVariants.length];
 
   const hasDataPoints = item.data.length >= 1;
 
   return (
-    <div className="group relative">
+    // A table needs the full row: three-column cards are far too narrow for it.
+    <div
+      className={`group relative ${
+        item.videos?.length || item.hourly?.length ? 'col-span-full' : ''
+      }`}
+    >
       <div
         className={`
           flex flex-col h-full
@@ -87,17 +133,32 @@ const AnalyticsCard: FC<{
             </span>
           </div>
           {item.percentageChange !== undefined && (
-            <TrendIndicator value={item.percentageChange} average={item.average} />
+            <TrendIndicator
+              value={item.percentageChange}
+              average={item.average}
+            />
           )}
         </div>
 
         {/* Content */}
-        {hasDataPoints ? (
+        {item.videos?.length ? (
+          <div className="px-[16px] pb-[14px]">
+            <VideoTable videos={item.videos} integrationId={integrationId} />
+          </div>
+        ) : item.hourly?.length ? (
+          <HeatmapGrid points={item.hourly} />
+        ) : item.breakdown?.length ? (
+          <BreakdownList entries={item.breakdown} color={color} />
+        ) : hasDataPoints ? (
           <>
             {/* Chart */}
             <div className="flex-1 px-[12px] py-[8px]">
               <div className="h-[120px] relative">
-                <ChartSocial data={item.data} color={color} key={`chart-${index}`} />
+                <ChartSocial
+                  data={item.data}
+                  color={color}
+                  key={`chart-${index}`}
+                />
               </div>
             </div>
 
@@ -219,8 +280,10 @@ export const RenderAnalytics: FC<{
   const totals = useMemo(() => {
     return data?.map((p: AnalyticsDataItem) => {
       const value =
-        (p?.data.reduce((acc: number, curr: { total: number }) => acc + curr.total, 0) || 0) /
-        (p.average ? p.data.length : 1);
+        (p?.data.reduce(
+          (acc: number, curr: { total: number }) => acc + curr.total,
+          0
+        ) || 0) / (p.average ? p.data.length : 1);
       if (p.average) {
         return value.toFixed(2) + '%';
       }
@@ -247,6 +310,7 @@ export const RenderAnalytics: FC<{
           item={item}
           total={totals[index]}
           index={index}
+          integrationId={integration.id}
         />
       ))}
     </div>

@@ -153,6 +153,13 @@ export type PostResponse = {
   postId: string; // The ID of the scheduled post returned by the platform
   releaseURL: string; // The URL of the post on the platform
   status: string; // Status of the operation or initial post status
+  /**
+   * Set when the provider published something other than what was asked — a
+   * downgraded privacy level, a different posting method. It travels to the
+   * post so the calendar can say so: without it, a video sitting in TikTok's
+   * inbox until it expires looks exactly like a public publication.
+   */
+  note?: string;
 };
 
 export type PostDetails<T = any> = {

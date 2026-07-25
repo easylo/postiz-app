@@ -76,7 +76,7 @@ export class PostActivity {
     for (const post of list) {
       await this._temporalService.client
         .getRawClient()
-        .workflow.signalWithStart('postWorkflowV105', {
+        .workflow.signalWithStart('postWorkflowV106', {
           workflowId: `post_${post.id}`,
           taskQueue: 'main',
           signal: 'poke',
@@ -108,6 +108,22 @@ export class PostActivity {
   @ActivityMethod()
   async updatePost(id: string, postId: string, releaseURL: string) {
     await this._postService.updatePost(id, postId, releaseURL);
+  }
+
+  /**
+   * Same as updatePost, plus the provider's note when it published something
+   * other than what was asked. A new activity rather than a fourth parameter on
+   * the existing one: changing an activity's signature breaks the executions
+   * already running against it.
+   */
+  @ActivityMethod()
+  async updatePostWithNote(
+    id: string,
+    postId: string,
+    releaseURL: string,
+    note?: string
+  ) {
+    await this._postService.updatePost(id, postId, releaseURL, note);
   }
 
   @ActivityMethod()

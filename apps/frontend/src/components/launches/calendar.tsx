@@ -1036,7 +1036,12 @@ const CalendarItem: FC<{
       className={clsx(
         'w-full flex h-full flex-1 flex-col group',
         'relative',
-        state === 'ERROR' && 'rounded-[10px] ring-2 ring-red-500'
+        state === 'ERROR' && 'rounded-[10px] ring-2 ring-red-500',
+        // Published, but not as asked — the provider left a note. Amber rather
+        // than red: the post went out, it just did not do what was requested.
+        state !== 'ERROR' &&
+          !!post.error &&
+          'rounded-[10px] ring-2 ring-amber-500'
       )}
       style={{
         opacity,
@@ -1047,6 +1052,15 @@ const CalendarItem: FC<{
           className="absolute -top-[6px] -left-[6px] z-20 w-[18px] h-[18px] rounded-full bg-red-500 flex items-center justify-center text-white text-[11px] font-bold cursor-pointer"
           data-tooltip-id="tooltip"
           data-tooltip-content={post.error || 'An error occurred while publishing this post'}
+        >
+          !
+        </div>
+      )}
+      {state !== 'ERROR' && !!post.error && (
+        <div
+          className="absolute -top-[6px] -left-[6px] z-20 w-[18px] h-[18px] rounded-full bg-amber-500 flex items-center justify-center text-white text-[11px] font-bold cursor-pointer"
+          data-tooltip-id="tooltip"
+          data-tooltip-content={post.error}
         >
           !
         </div>

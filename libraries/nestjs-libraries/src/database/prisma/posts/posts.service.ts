@@ -77,8 +77,8 @@ export class PostsService {
     return this._postRepository.searchForMissingThreeHoursPosts();
   }
 
-  updatePost(id: string, postId: string, releaseURL: string) {
-    return this._postRepository.updatePost(id, postId, releaseURL);
+  updatePost(id: string, postId: string, releaseURL: string, note?: string) {
+    return this._postRepository.updatePost(id, postId, releaseURL, note);
   }
 
   async getMissingContent(
@@ -734,7 +734,7 @@ export class PostsService {
     try {
       await this._temporalService.client
         .getRawClient()
-        ?.workflow.start('postWorkflowV105', {
+        ?.workflow.start('postWorkflowV106', {
           workflowId: `post_${postId}`,
           taskQueue: 'main',
           workflowIdConflictPolicy: 'TERMINATE_EXISTING',

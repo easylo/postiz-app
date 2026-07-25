@@ -389,7 +389,7 @@ export class PostsRepository {
     });
   }
 
-  updatePost(id: string, postId: string, releaseURL: string) {
+  updatePost(id: string, postId: string, releaseURL: string, note?: string) {
     return this._post.model.post.update({
       where: {
         id,
@@ -398,6 +398,12 @@ export class PostsRepository {
         state: 'PUBLISHED',
         releaseURL,
         releaseId: postId,
+        // A provider may publish something other than what was asked — a
+        // downgraded privacy level, a media dropped in an inbox rather than
+        // published. The note rides on `error` because it is the only free-text
+        // field on a post, and it is cleared on a clean publish so a note never
+        // outlives the attempt that produced it.
+        error: note ?? null,
       },
     });
   }

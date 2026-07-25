@@ -782,8 +782,94 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  /**
+   * The ladder walked when TikTok refuses a public direct post.
+   *
+   * An app pending audit may only publish privately, and TikTok says so at init
+   * with `unaudited_client_can_only_post_to_private_accounts`. Each rung is
+   * tried in turn rather than failing the post outright — but every rung
+   * publishes something *other* than what was asked, so the one that succeeds
+   * is reported back and ends up on the post. A silent downgrade would be worse
+   * than the error it replaces: the second rung does not publish at all.
+   */
+  private static readonly UNAUDITED_FALLBACKS: Array<{
+    settings: Partial<TikTokDto>;
+    note: string;
+  }> = [
+    {
+      settings: { privacy_level: 'SELF_ONLY' },
+      note: 'TikTok refused a public post (app pending audit). Published as private (SELF_ONLY) — only you can see it. Switch it to public from the TikTok app once the audit passes.',
+    },
+    {
+      settings: {
+        privacy_level: 'SELF_ONLY',
+        content_posting_method: 'UPLOAD',
+      },
+      note: 'TikTok refused a direct post (app pending audit). The video was sent to your TikTok inbox and is NOT published — finish it in the TikTok app within 24 hours or it is discarded.',
+    },
+  ];
+
+  /**
+   * Matches the raw TikTok code rather than the human message: handleErrors
+   * rewrites the message, and a wording change there must not silently disable
+   * the fallback. The message is still checked as a second chance, since the
+   * raw payload is truncated before it reaches the failure details.
+   */
+  private isUnauditedAppRefusal(err: any): boolean {
+    const haystack = `${err?.message ?? ''} ${JSON.stringify(
+      err?.details ?? ''
+    )}`;
+
+    return (
+      haystack.indexOf('unaudited_client_can_only_post_to_private_accounts') >
+        -1 || haystack.indexOf('App not approved for public posting') > -1
+    );
+  }
+
   async post(
     id: string,
+    accessToken: string,
+    postDetails: PostDetails<TikTokDto>[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    try {
+      return await this.attemptPost(accessToken, postDetails, integration);
+    } catch (err) {
+      if (!this.isUnauditedAppRefusal(err)) {
+        throw err;
+      }
+
+      const [firstPost, ...rest] = postDetails;
+
+      for (const fallback of TiktokProvider.UNAUDITED_FALLBACKS) {
+        try {
+          const [result] = await this.attemptPost(
+            accessToken,
+            [
+              {
+                ...firstPost,
+                settings: { ...firstPost.settings, ...fallback.settings },
+              },
+              ...rest,
+            ],
+            integration
+          );
+
+          return [{ ...result, note: fallback.note }];
+        } catch (retry) {
+          // Only keep climbing down while TikTok keeps refusing for the same
+          // reason. Anything else is a real failure and belongs to the caller.
+          if (!this.isUnauditedAppRefusal(retry)) {
+            throw retry;
+          }
+        }
+      }
+
+      throw err;
+    }
+  }
+
+  private async attemptPost(
     accessToken: string,
     postDetails: PostDetails<TikTokDto>[],
     integration: Integration

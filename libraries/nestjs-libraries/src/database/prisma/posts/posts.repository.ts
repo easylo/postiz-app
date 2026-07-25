@@ -22,6 +22,24 @@ dayjs.extend(weekOfYear);
 dayjs.extend(isSameOrAfter);
 dayjs.extend(utc);
 
+// `settings` is a free-form JSON blob owned by whoever created the post, and for
+// YouTube it holds whole SRT files — never ship it wholesale to a list endpoint or
+// a webhook. External tooling only needs the correlation key it wrote there, so we
+// lift `externalRef` out and drop the rest.
+function withExternalRef<T extends { settings?: string | null }>(post: T) {
+  const { settings, ...rest } = post;
+  let externalRef: string | null = null;
+  try {
+    externalRef = settings ? JSON.parse(settings)?.externalRef ?? null : null;
+  } catch (e) {
+    // Malformed settings must not take down a listing.
+    externalRef = null;
+  }
+  return { ...rest, externalRef } as Omit<T, 'settings'> & {
+    externalRef: string | null;
+  };
+}
+
 @Injectable()
 export class PostsRepository {
   constructor(
@@ -178,6 +196,7 @@ export class PostsRepository {
         releaseURL: true,
         releaseId: true,
         state: true,
+        settings: true,
         intervalInDays: true,
         group: true,
         creationMethod: true,
@@ -197,7 +216,7 @@ export class PostsRepository {
       },
     });
 
-    return list.reduce((all, post) => {
+    return list.map(withExternalRef).reduce((all, post) => {
       if (!post.intervalInDays) {
         return [...all, post];
       }
@@ -924,7 +943,7 @@ export class PostsRepository {
   }
 
   async getPostByForWebhookId(postId: string) {
-    return this._post.model.post.findMany({
+    const posts = await this._post.model.post.findMany({
       where: {
         id: postId,
         deletedAt: null,
@@ -936,6 +955,7 @@ export class PostsRepository {
         publishDate: true,
         releaseURL: true,
         state: true,
+        settings: true,
         integration: {
           select: {
             id: true,
@@ -947,6 +967,8 @@ export class PostsRepository {
         },
       },
     });
+
+    return posts.map(withExternalRef);
   }
 
   async getPostsSince(orgId: string, since: string) {

@@ -43,6 +43,13 @@ const SNAPSHOT_WINDOW_DAYS = 7;
 const HOURLY_RETENTION_DAYS = 28;
 
 /**
+ * How far back a single video's curve reaches. Well past the hourly retention
+ * on purpose: beyond 28 days the readings survive at one per day, and those
+ * daily points are exactly what the "day" view of the curve shows.
+ */
+const VIDEO_HISTORY_WINDOW_DAYS = 180;
+
+/**
  * Fills in `percentageChange` for every metric, comparing the first half of the
  * series against the second one.
  *
@@ -352,6 +359,32 @@ export class IntegrationService {
     return Array.from(totals.entries())
       .map(([at, value]) => ({ at, value: Math.round(value) }))
       .sort((a, b) => a.at.localeCompare(b.at));
+  }
+
+  /**
+   * The growth curve of one video, hour by hour. The day view is the same
+   * payload regrouped by the client, so there is no second route for it.
+   *
+   * Goes through the org-scoped lookup: a video id alone must never be enough
+   * to read another organization's analytics.
+   */
+  async videoHistory(orgId: string, integrationId: string, videoId: string) {
+    const integration = await this._integrationRepository.getIntegrationById(
+      orgId,
+      integrationId
+    );
+
+    if (!integration) {
+      return [];
+    }
+
+    return toHourlyDeltas(
+      await this._integrationRepository.getVideoSnapshots(
+        integration.id,
+        dayjs().utc().subtract(VIDEO_HISTORY_WINDOW_DAYS, 'day').toDate(),
+        videoId
+      )
+    );
   }
 
   async changeActiveCron(orgId: string) {

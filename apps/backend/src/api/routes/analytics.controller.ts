@@ -30,4 +30,13 @@ export class AnalyticsController {
   ) {
     return this._postsService.checkPostAnalytics(org.id, postId, +date);
   }
+
+  @Get('/:integration/videos/:videoId')
+  async getVideoHistory(
+    @GetOrgFromRequest() org: Organization,
+    @Param('integration') integration: string,
+    @Param('videoId') videoId: string
+  ) {
+    return this._integrationService.videoHistory(org.id, integration, videoId);
+  }
 }

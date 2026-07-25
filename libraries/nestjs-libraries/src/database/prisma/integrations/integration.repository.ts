@@ -17,7 +17,8 @@ export class IntegrationRepository {
     private _exisingPlugData: PrismaRepository<'exisingPlugData'>,
     private _customers: PrismaRepository<'customer'>,
     private _mentions: PrismaRepository<'mentions'>,
-    private _analyticsHistory: PrismaRepository<'integrationAnalytics'>
+    private _analyticsHistory: PrismaRepository<'integrationAnalytics'>,
+    private _videoAnalytics: PrismaRepository<'videoAnalytics'>
   ) {}
 
   /**
@@ -72,6 +73,60 @@ export class IntegrationRepository {
       where: { integrationId, postId, date: { gte: since } },
       orderBy: { date: 'asc' },
       select: { label: true, date: true, total: true },
+    });
+  }
+
+  /**
+   * One reading per video per hour. A replayed run lands on the same row and
+   * overwrites it, so a retry never inflates the history.
+   */
+  saveVideoSnapshots(
+    integrationId: string,
+    capturedAt: Date,
+    hour: number,
+    videos: { videoId: string; views: number }[]
+  ) {
+    return Promise.all(
+      videos.map(({ videoId, views }) =>
+        this._videoAnalytics.model.videoAnalytics.upsert({
+          where: {
+            integrationId_videoId_capturedAt: {
+              integrationId,
+              videoId,
+              capturedAt,
+            },
+          },
+          create: { integrationId, videoId, capturedAt, hour, views },
+          update: { views },
+        })
+      )
+    );
+  }
+
+  /**
+   * Ordered by video then by time: the variation is a subtraction between two
+   * consecutive readings of the same video, so the caller relies on that order.
+   */
+  getVideoSnapshots(integrationId: string, since: Date, videoId?: string) {
+    return this._videoAnalytics.model.videoAnalytics.findMany({
+      where: {
+        integrationId,
+        capturedAt: { gte: since },
+        ...(videoId ? { videoId } : {}),
+      },
+      orderBy: [{ videoId: 'asc' }, { capturedAt: 'asc' }],
+      select: { videoId: true, capturedAt: true, views: true },
+    });
+  }
+
+  /**
+   * Past the cutoff only the midnight reading survives, which leaves an
+   * unbounded daily history at one row per video per day. The variation logic
+   * does not notice: it differences consecutive readings whatever their spacing.
+   */
+  purgeVideoSnapshots(before: Date) {
+    return this._videoAnalytics.model.videoAnalytics.deleteMany({
+      where: { capturedAt: { lt: before }, hour: { not: 0 } },
     });
   }
 

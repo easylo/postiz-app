@@ -342,6 +342,7 @@ model Integration {
   plugs                 Plugs[]
   posts                 Post[]
   analyticsHistory      IntegrationAnalytics[]
+  videoAnalytics        VideoAnalytics[]
 
   @@unique([organizationId, internalId])
   @@index([rootInternalId])
@@ -994,4 +995,29 @@ model IntegrationAnalytics {
 
   @@unique([integrationId, postId, label, date])
   @@index([integrationId, postId, date])
+}
+
+// Hourly readings of the view counter of a tracked video.
+//
+// Neither the YouTube Analytics API nor TikTok's Display API exposes an hourly
+// history, so the only way to know when views arrived is to keep asking. What
+// is stored is the counter as the provider gives it, never the variation: a
+// cumulative counter re-syncs itself on the next reading, where a stored delta
+// would stay wrong forever once a run is missed.
+model VideoAnalytics {
+  id            String      @id @default(cuid())
+  integrationId String
+  videoId       String
+  // Truncated to the hour, in UTC. The unique key makes a replayed reading
+  // overwrite the row instead of piling up.
+  capturedAt    DateTime
+  // Redundant with capturedAt, but Prisma cannot filter on the hour part of a
+  // date without raw SQL, and the purge needs exactly that.
+  hour          Int
+  views         Int
+  createdAt     DateTime    @default(now())
+  integration   Integration @relation(fields: [integrationId], references: [id])
+
+  @@unique([integrationId, videoId, capturedAt])
+  @@index([integrationId, capturedAt])
 }

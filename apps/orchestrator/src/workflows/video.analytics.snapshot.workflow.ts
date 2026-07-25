@@ -20,9 +20,19 @@ const { captureVideoAnalyticsSnapshots } =
  * of its live execution.
  */
 export async function videoAnalyticsSnapshotWorkflow() {
-  await captureVideoAnalyticsSnapshots();
   while (true) {
-    await sleep('1 hour');
-    await captureVideoAnalyticsSnapshots();
+    try {
+      await captureVideoAnalyticsSnapshots();
+    } catch (e) {
+      // A failed hour must not end the loop: the next one picks it up again.
+      // Without this, one exhausted retry stops the capture until someone
+      // restarts the orchestrator, and nothing says so.
+    }
+
+    // Sleep to the next hour boundary rather than a flat hour. A fixed sleep
+    // makes the period `1 hour + sweep duration`, so the run times drift and
+    // whole hour buckets are never captured at all on instances where the
+    // sweep is slow. Date.now() is deterministic inside a Temporal workflow.
+    await sleep(3600000 - (Date.now() % 3600000));
   }
 }

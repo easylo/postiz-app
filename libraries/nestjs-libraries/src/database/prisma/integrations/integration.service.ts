@@ -50,6 +50,13 @@ const HOURLY_RETENTION_DAYS = 28;
 const VIDEO_HISTORY_WINDOW_DAYS = 180;
 
 /**
+ * Beyond this spacing, two readings are a daily sediment rather than an hourly
+ * series, and their gain is reported as one point instead of being spread over
+ * hours nobody measured.
+ */
+const MAX_SPREAD_HOURS = 2;
+
+/**
  * Fills in `percentageChange` for every metric, comparing the first half of the
  * series against the second one.
  *
@@ -112,9 +119,16 @@ const withPercentageChange = (analytics: AnalyticsData[]): AnalyticsData[] =>
  * rounding here before the channel-wide sum either erases a small gain (0.33
  * rounds to 0) or doubles one (0.5 rounds up on every one of the hours it
  * spans). Callers round once, after they are done summing.
+ *
+ * `maxSpreadHours` caps how big a gap is still treated as hourly. Past it, the
+ * readings are daily sediment rather than a missed run, and spreading would
+ * invent a resolution nobody measured. The default spreads every gap: callers
+ * reading only within the hourly retention window have no daily-sediment gaps
+ * to worry about.
  */
 const toHourlyDeltas = (
-  snapshots: { capturedAt: Date; views: number }[]
+  snapshots: { capturedAt: Date; views: number }[],
+  maxSpreadHours = Infinity
 ): Array<{ at: string; value: number }> => {
   const points: Array<{ at: string; value: number }> = [];
 
@@ -128,10 +142,19 @@ const toHourlyDeltas = (
         (current.capturedAt.getTime() - previous.capturedAt.getTime()) / 3600000
       )
     );
-    const perHour = Math.max(0, current.views - previous.views) / hours;
+    const gained = Math.max(0, current.views - previous.views);
+
+    // Past the threshold the readings are no longer hourly at all: beyond the
+    // hourly retention only the midnight row survives, so spreading a whole
+    // day's gain over 24 points would claim a resolution we do not have.
+    if (hours > maxSpreadHours) {
+      points.push({ at: current.capturedAt.toISOString(), value: gained });
+      continue;
+    }
 
     // Walked backwards from `current`, so the gain is credited to the hours
     // that follow `previous` up to and including `current`.
+    const perHour = gained / hours;
     for (let hour = hours; hour > 0; hour--) {
       points.push({
         at: new Date(
@@ -383,7 +406,8 @@ export class IntegrationService {
         integration.id,
         dayjs().utc().subtract(VIDEO_HISTORY_WINDOW_DAYS, 'day').toDate(),
         videoId
-      )
+      ),
+      MAX_SPREAD_HOURS
     );
   }
 

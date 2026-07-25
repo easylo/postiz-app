@@ -5,6 +5,10 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { ChartSocial } from '@gitroom/frontend/components/analytics/chart-social';
 import { LoadingComponent } from '@gitroom/frontend/components/layout/loading';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import {
+  VideoTable,
+  AnalyticsVideoRow,
+} from '@gitroom/frontend/components/platform-analytics/video.table';
 
 interface AnalyticsDataItem {
   label: string;
@@ -12,157 +16,8 @@ interface AnalyticsDataItem {
   average?: boolean;
   percentageChange?: number;
   breakdown?: Array<{ key: string; value: number }>;
-  videos?: Array<{
-    id: string;
-    title: string;
-    url?: string;
-    thumbnail?: string;
-    date: string;
-    views: number;
-    likes: number;
-    comments: number;
-  }>;
+  videos?: AnalyticsVideoRow[];
 }
-
-type VideoSortKey = 'date' | 'views' | 'likes' | 'comments';
-
-const SortableHeader: FC<{
-  label: string;
-  sortBy: VideoSortKey;
-  active: VideoSortKey;
-  ascending: boolean;
-  onSort: (key: VideoSortKey) => void;
-  className?: string;
-}> = ({ label, sortBy, active, ascending, onSort, className = '' }) => (
-  <th className={`font-medium py-[8px] ${className}`}>
-    <button
-      type="button"
-      onClick={() => onSort(sortBy)}
-      className="inline-flex items-center gap-[4px] hover:text-white transition-colors"
-    >
-      {label}
-      <span
-        className={`text-[10px] ${
-          active === sortBy ? 'opacity-100' : 'opacity-0'
-        }`}
-      >
-        {ascending ? '▲' : '▼'}
-      </span>
-    </button>
-  </th>
-);
-
-const VideoTable: FC<{ videos: NonNullable<AnalyticsDataItem['videos']> }> = ({
-  videos,
-}) => {
-  const format = (value: number) => value.toLocaleString();
-  // The provider already hands the rows back newest first; this is the same
-  // order, just made explicit so the header can toggle it.
-  const [sortKey, setSortKey] = useState<VideoSortKey>('date');
-  const [ascending, setAscending] = useState(false);
-
-  const toggle = useCallback(
-    (key: VideoSortKey) => {
-      if (key === sortKey) {
-        setAscending((current) => !current);
-        return;
-      }
-      setSortKey(key);
-      // A freshly picked column starts on its most useful end: biggest numbers
-      // and most recent dates first.
-      setAscending(false);
-    },
-    [sortKey]
-  );
-
-  const sorted = useMemo(() => {
-    const value = (video: (typeof videos)[number]) =>
-      sortKey === 'date' ? new Date(video.date).getTime() || 0 : video[sortKey];
-
-    return [...videos].sort((a, b) =>
-      ascending ? value(a) - value(b) : value(b) - value(a)
-    );
-  }, [videos, sortKey, ascending]);
-
-  const headerProps = { active: sortKey, ascending, onSort: toggle };
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-[14px]">
-        <thead>
-          <tr className="text-newTableText text-[13px] text-left">
-            <th className="font-medium py-[8px] pr-[12px]">Video</th>
-            <SortableHeader
-              label="Published"
-              sortBy="date"
-              className="px-[12px] whitespace-nowrap"
-              {...headerProps}
-            />
-            <SortableHeader
-              label="Views"
-              sortBy="views"
-              className="px-[12px] text-right"
-              {...headerProps}
-            />
-            <SortableHeader
-              label="Likes"
-              sortBy="likes"
-              className="px-[12px] text-right"
-              {...headerProps}
-            />
-            <SortableHeader
-              label="Comments"
-              sortBy="comments"
-              className="pl-[12px] text-right"
-              {...headerProps}
-            />
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((video) => (
-            <tr key={video.id} className="border-t border-newTableBorder">
-              <td className="py-[10px] pr-[12px]">
-                <div className="flex items-center gap-[10px] min-w-[220px]">
-                  {video.thumbnail && (
-                    <img
-                      src={video.thumbnail}
-                      alt=""
-                      className="w-[64px] h-[36px] object-cover rounded-[4px] flex-none"
-                    />
-                  )}
-                  {video.url ? (
-                    <a
-                      href={video.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="hover:underline line-clamp-2"
-                    >
-                      {video.title}
-                    </a>
-                  ) : (
-                    <span className="line-clamp-2">{video.title}</span>
-                  )}
-                </div>
-              </td>
-              <td className="py-[10px] px-[12px] text-newTableText whitespace-nowrap">
-                {video.date ? new Date(video.date).toLocaleDateString() : '—'}
-              </td>
-              <td className="py-[10px] px-[12px] text-right tabular-nums">
-                {format(video.views)}
-              </td>
-              <td className="py-[10px] px-[12px] text-right tabular-nums">
-                {format(video.likes)}
-              </td>
-              <td className="py-[10px] pl-[12px] text-right tabular-nums">
-                {format(video.comments)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
 
 const BreakdownList: FC<{
   entries: Array<{ key: string; value: number }>;
@@ -235,7 +90,8 @@ const AnalyticsCard: FC<{
   item: AnalyticsDataItem;
   total: string | number;
   index: number;
-}> = ({ item, total, index }) => {
+  integrationId: string;
+}> = ({ item, total, index, integrationId }) => {
   const colorVariants = ['purple', 'green', 'blue'] as const;
   const color = colorVariants[index % colorVariants.length];
 
@@ -283,7 +139,7 @@ const AnalyticsCard: FC<{
         {/* Content */}
         {item.videos?.length ? (
           <div className="px-[16px] pb-[14px]">
-            <VideoTable videos={item.videos} />
+            <VideoTable videos={item.videos} integrationId={integrationId} />
           </div>
         ) : item.breakdown?.length ? (
           <BreakdownList entries={item.breakdown} color={color} />
@@ -448,6 +304,7 @@ export const RenderAnalytics: FC<{
           item={item}
           total={totals[index]}
           index={index}
+          integrationId={integration.id}
         />
       ))}
     </div>

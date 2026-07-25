@@ -24,6 +24,15 @@ export class InfiniteWorkflowRegister implements OnModuleInit {
             taskQueue: 'main',
           });
       } catch (err) {}
+
+      try {
+        await this._temporalService.client
+          ?.getRawClient()
+          ?.workflow?.start('videoAnalyticsSnapshotWorkflow', {
+            workflowId: 'video-analytics-snapshot-workflow',
+            taskQueue: 'main',
+          });
+      } catch (err) {}
     }
   }
 }

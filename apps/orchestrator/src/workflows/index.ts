@@ -10,3 +10,4 @@ export * from './send.email.workflow';
 export * from './refresh.token.workflow';
 export * from './streak.workflow';
 export * from './analytics.snapshot.workflow';
+export * from './video.analytics.snapshot.workflow';

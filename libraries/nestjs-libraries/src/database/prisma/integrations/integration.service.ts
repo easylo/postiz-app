@@ -35,6 +35,14 @@ dayjs.extend(utc);
 const SNAPSHOT_WINDOW_DAYS = 7;
 
 /**
+ * Past this, only the midnight reading of each video survives the purge. Four
+ * weeks is what makes the day-by-hour grid readable: it puts four measurements
+ * in each of its 168 cells, where two would let a single viral evening pass for
+ * a habit.
+ */
+const HOURLY_RETENTION_DAYS = 28;
+
+/**
  * Fills in `percentageChange` for every metric, comparing the first half of the
  * series against the second one.
  *
@@ -204,6 +212,60 @@ export class IntegrationService {
         // Nothing to do: the next run picks it up again.
       }
     }
+  }
+
+  /**
+   * Records the view counter of every tracked video, once an hour.
+   *
+   * Providers expose no hourly history at all, so this sweep is the only source
+   * of the growth curve and of the day-by-hour grid. It calls `videosAnalytics`
+   * rather than `analytics`, which would drag along aggregate queries nobody
+   * reads here.
+   *
+   * One failing integration — expired token, provider outage — must not stop
+   * the sweep, so each is isolated.
+   */
+  async captureVideoAnalyticsSnapshots() {
+    const integrations =
+      await this._integrationRepository.getIntegrationsForAnalyticsSnapshot();
+
+    // Every video of this run lands on the same hour, so a retry overwrites the
+    // same rows instead of scattering readings a few minutes apart.
+    const capturedAt = dayjs().utc().startOf('hour');
+
+    for (const integration of integrations) {
+      try {
+        const provider = this._integrationManager.getSocialIntegration(
+          integration.providerIdentifier
+        );
+
+        if (!provider?.videosAnalytics) {
+          continue;
+        }
+
+        const videos = await provider.videosAnalytics(
+          integration.internalId,
+          integration.token
+        );
+
+        if (!videos?.length) {
+          continue;
+        }
+
+        await this._integrationRepository.saveVideoSnapshots(
+          integration.id,
+          capturedAt.toDate(),
+          capturedAt.hour(),
+          videos.map((video) => ({ videoId: video.id, views: video.views }))
+        );
+      } catch (e) {
+        // Nothing to do: the next hour picks it up again.
+      }
+    }
+
+    await this._integrationRepository.purgeVideoSnapshots(
+      dayjs().utc().subtract(HOURLY_RETENTION_DAYS, 'day').toDate()
+    );
   }
 
   async changeActiveCron(orgId: string) {

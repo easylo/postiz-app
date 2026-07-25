@@ -2,10 +2,17 @@ name: Build & push fork image (Docker Hub)
 
 # Build multi-arch de l'image Postiz du fork, poussée sur Docker Hub sous
 # laurentrichard/apps:postiz-app-<sha>. Runners natifs amd64 + arm64 (repo
-# public), assemblage du manifest par digests. Déclenchement manuel.
+# public), assemblage du manifest par digests.
+# Déclenchement : à chaque arrivée sur main, plus manuellement au besoin.
 # Secrets requis : DOCKERHUB_USERNAME, DOCKERHUB_TOKEN.
 
 on:
+  # Couvre les deux façons dont du code arrive sur main : une PR fusionnée
+  # comme une fusion locale poussée. `pull_request: closed` ne verrait que
+  # la première.
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 env:

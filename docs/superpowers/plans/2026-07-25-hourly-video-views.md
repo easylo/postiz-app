@@ -360,9 +360,35 @@ Dans `youtube.provider.ts`, remplacer intégralement le bloc `try { ... } catch 
 
 - [ ] **Step 5: Extraire la liste TikTok**
 
-Dans `tiktok.provider.ts`, ajouter cette méthode **avant** `async analytics(`, et importer `AnalyticsVideo` :
+Dans `tiktok.provider.ts`, ajouter ces **deux** méthodes **avant** `async analytics(`, et importer `AnalyticsVideo`.
+
+Le mapping est isolé dans son propre helper parce que deux chemins en ont besoin : `analytics()`, qui a déjà la réponse de `video/list` sous la main, et `videosAnalytics()`, que le job horaire appelle seul. Sans lui, l'un des deux referait un appel que le commit `6e0f394` avait justement fusionné.
 
 ```ts
+  /**
+   * The ten most recent videos, as analytics rows.
+   *
+   * Split out because analytics() already holds the video/list response and
+   * must not fetch it twice, while the hourly job has nothing and must fetch it
+   * itself. One mapping, two callers.
+   */
+  private toAnalyticsVideos(videos: any[]): AnalyticsVideo[] {
+    return [...videos]
+      .sort((a: any, b: any) => (b.create_time || 0) - (a.create_time || 0))
+      .slice(0, 10)
+      .map((video: any) => ({
+        id: String(video.id),
+        title: video.title || 'Untitled',
+        url: video.share_url,
+        thumbnail: video.cover_image_url,
+        // TikTok hands back seconds since epoch, not milliseconds.
+        date: new Date((video.create_time || 0) * 1000).toISOString(),
+        views: video.view_count || 0,
+        likes: video.like_count || 0,
+        comments: video.comment_count || 0,
+      }));
+  }
+
   /**
    * One call is enough: video/list returns the statistics alongside the ids.
    */
@@ -386,42 +412,26 @@ Dans `tiktok.provider.ts`, ajouter cette méthode **avant** `async analytics(`, 
       const videoListData = await videoListResponse.json();
       const videos = videoListData?.data?.videos;
 
-      if (!videos?.length) {
-        return [];
-      }
-
-      return [...videos]
-        .sort((a: any, b: any) => (b.create_time || 0) - (a.create_time || 0))
-        .slice(0, 10)
-        .map((video: any) => ({
-          id: String(video.id),
-          title: video.title || 'Untitled',
-          url: video.share_url,
-          thumbnail: video.cover_image_url,
-          // TikTok hands back seconds since epoch, not milliseconds.
-          date: new Date((video.create_time || 0) * 1000).toISOString(),
-          views: video.view_count || 0,
-          likes: video.like_count || 0,
-          comments: video.comment_count || 0,
-        }));
+      return videos?.length ? this.toAnalyticsVideos(videos) : [];
     } catch (e) {
       return [];
     }
   }
 ```
 
-- [ ] **Step 6: Faire appeler `videosAnalytics` par `analytics()` côté TikTok**
+- [ ] **Step 6: Faire appeler le mappeur par `analytics()` côté TikTok**
 
 Dans `tiktok.provider.ts`, remplacer le `result.push({ label: 'Recent Videos', ... })` des lignes 987-1006 par :
 
 ```ts
-        const videos = await this.videosAnalytics(id, accessToken);
-        if (videos.length) {
-          result.push({ label: 'Recent Videos', data: [], videos });
-        }
+        result.push({
+          label: 'Recent Videos',
+          data: [],
+          videos: this.toAnalyticsVideos(videoDetails),
+        });
 ```
 
-**Attention :** cela ajoute un second appel à `video/list` par lecture d'analytics TikTok, alors que le commit `6e0f394` avait justement fusionné les deux. C'est le prix de la généricité — la même liste doit être joignable sans passer par `analytics()`. Les agrégats des lignes 924-985 continuent d'utiliser `videoDetails`, la variable issue du premier appel, et **ne doivent pas être touchés** : leurs totaux doivent rester identiques, y compris le libellé dynamique `(last N videos)`.
+`analytics()` continue donc de n'émettre **qu'un seul** appel à `video/list` : il réutilise le `videoDetails` qu'il a déjà, et n'appelle jamais `videosAnalytics()`. Les agrégats des lignes 924-985 s'appuient sur cette même variable et **ne doivent pas être touchés** : leurs totaux doivent rester identiques, y compris le libellé dynamique `(last N videos)`.
 
 - [ ] **Step 7: Compiler**
 

@@ -415,6 +415,59 @@ export class PostsRepository {
     });
   }
 
+  /**
+   * Strips credentials from anything kept alongside a failed post.
+   *
+   * `changeState` is handed the whole post list, and every post carries its
+   * integration — access token and refresh token included. Stored verbatim, an
+   * error row hands anyone with database access a working refresh token, long
+   * after the access token itself has expired.
+   *
+   * The payload is worth keeping for diagnosis, so values are replaced rather
+   * than fields dropped. Applied to the message too: it holds a provider error
+   * today, but nothing guarantees a provider never echoes a token back.
+   */
+  private static redact(value: any): any {
+    const secrets = new Set([
+      'token',
+      'refreshToken',
+      'accessToken',
+      'access_token',
+      'refresh_token',
+    ]);
+
+    const walk = (node: any): any => {
+      if (Array.isArray(node)) {
+        return node.map(walk);
+      }
+
+      if (node && typeof node === 'object') {
+        return Object.fromEntries(
+          Object.entries(node).map(([key, entry]) => [
+            key,
+            secrets.has(key) ? '[redacted]' : walk(entry),
+          ])
+        );
+      }
+
+      return node;
+    };
+
+    if (typeof value !== 'string') {
+      return JSON.stringify(walk(value));
+    }
+
+    try {
+      return JSON.stringify(walk(JSON.parse(value)));
+    } catch (e) {
+      // Not JSON — scrub textually rather than store it untouched.
+      return value.replace(
+        /"(token|refreshToken|accessToken|access_token|refresh_token)"\s*:\s*"[^"]*"/g,
+        '"$1":"[redacted]"'
+      );
+    }
+  }
+
   async changeState(id: string, state: State, err?: any, body?: any) {
     const update = await this._post.model.post.update({
       where: {
@@ -422,9 +475,7 @@ export class PostsRepository {
       },
       data: {
         state,
-        ...(err
-          ? { error: typeof err === 'string' ? err : JSON.stringify(err) }
-          : {}),
+        ...(err ? { error: PostsRepository.redact(err) } : {}),
       },
       include: {
         integration: {
@@ -439,11 +490,11 @@ export class PostsRepository {
       try {
         await this._errors.model.errors.create({
           data: {
-            message: typeof err === 'string' ? err : JSON.stringify(err),
+            message: PostsRepository.redact(err),
             organizationId: update.organizationId,
             platform: update.integration.providerIdentifier,
             postId: update.id,
-            body: typeof body === 'string' ? body : JSON.stringify(body),
+            body: PostsRepository.redact(body),
           },
         });
       } catch (err) {}

@@ -9,6 +9,7 @@ import {
   VideoTable,
   AnalyticsVideoRow,
 } from '@gitroom/frontend/components/platform-analytics/video.table';
+import { HeatmapGrid } from '@gitroom/frontend/components/platform-analytics/heatmap.grid';
 
 interface AnalyticsDataItem {
   label: string;
@@ -17,6 +18,7 @@ interface AnalyticsDataItem {
   percentageChange?: number;
   breakdown?: Array<{ key: string; value: number }>;
   videos?: AnalyticsVideoRow[];
+  hourly?: Array<{ at: string; value: number }>;
 }
 
 const BreakdownList: FC<{
@@ -100,7 +102,9 @@ const AnalyticsCard: FC<{
   return (
     // A table needs the full row: three-column cards are far too narrow for it.
     <div
-      className={`group relative ${item.videos?.length ? 'col-span-full' : ''}`}
+      className={`group relative ${
+        item.videos?.length || item.hourly?.length ? 'col-span-full' : ''
+      }`}
     >
       <div
         className={`
@@ -141,6 +145,8 @@ const AnalyticsCard: FC<{
           <div className="px-[16px] pb-[14px]">
             <VideoTable videos={item.videos} integrationId={integrationId} />
           </div>
+        ) : item.hourly?.length ? (
+          <HeatmapGrid points={item.hourly} />
         ) : item.breakdown?.length ? (
           <BreakdownList entries={item.breakdown} color={color} />
         ) : hasDataPoints ? (

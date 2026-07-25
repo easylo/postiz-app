@@ -100,6 +100,11 @@ const withPercentageChange = (analytics: AnalyticsData[]): AnalyticsData[] =>
  *
  * That spreading is a smoothing, not a measurement: if the sweep skipped a
  * night, the grid will show activity at 4am that nobody actually produced.
+ *
+ * `value` is left fractional on purpose: this helper runs once per video, and
+ * rounding here before the channel-wide sum either erases a small gain (0.33
+ * rounds to 0) or doubles one (0.5 rounds up on every one of the hours it
+ * spans). Callers round once, after they are done summing.
  */
 const toHourlyDeltas = (
   snapshots: { capturedAt: Date; views: number }[]
@@ -125,7 +130,7 @@ const toHourlyDeltas = (
         at: new Date(
           current.capturedAt.getTime() - (hour - 1) * 3600000
         ).toISOString(),
-        value: Math.round(perHour),
+        value: perHour,
       });
     }
   }
@@ -345,7 +350,7 @@ export class IntegrationService {
     }
 
     return Array.from(totals.entries())
-      .map(([at, value]) => ({ at, value }))
+      .map(([at, value]) => ({ at, value: Math.round(value) }))
       .sort((a, b) => a.at.localeCompare(b.at));
   }
 

@@ -84,6 +84,55 @@ const withPercentageChange = (analytics: AnalyticsData[]): AnalyticsData[] =>
     return { ...metric, percentageChange: Math.round(change * 10) / 10 };
   });
 
+/**
+ * Turns cumulative view counters into what was gained between two readings.
+ *
+ * Three cases the stored counters cannot express on their own:
+ *
+ * - The **first** reading has no predecessor. It carries every view the video
+ *   collected before we started watching it, so it is dropped rather than drawn
+ *   as a spike of twelve thousand views that never happened.
+ * - A counter can **go down** — spam removal, a video pulled offline. A negative
+ *   gain means nothing here, so it is floored at zero.
+ * - A **missed run** leaves a gap of several hours. The gain straddling it is
+ *   spread evenly over the hours it covers, instead of landing entirely on the
+ *   hour the job came back and inventing a peak there.
+ *
+ * That spreading is a smoothing, not a measurement: if the sweep skipped a
+ * night, the grid will show activity at 4am that nobody actually produced.
+ */
+const toHourlyDeltas = (
+  snapshots: { capturedAt: Date; views: number }[]
+): Array<{ at: string; value: number }> => {
+  const points: Array<{ at: string; value: number }> = [];
+
+  for (let i = 1; i < snapshots.length; i++) {
+    const previous = snapshots[i - 1];
+    const current = snapshots[i];
+
+    const hours = Math.max(
+      1,
+      Math.round(
+        (current.capturedAt.getTime() - previous.capturedAt.getTime()) / 3600000
+      )
+    );
+    const perHour = Math.max(0, current.views - previous.views) / hours;
+
+    // Walked backwards from `current`, so the gain is credited to the hours
+    // that follow `previous` up to and including `current`.
+    for (let hour = hours; hour > 0; hour--) {
+      points.push({
+        at: new Date(
+          current.capturedAt.getTime() - (hour - 1) * 3600000
+        ).toISOString(),
+        value: Math.round(perHour),
+      });
+    }
+  }
+
+  return points;
+};
+
 @Injectable()
 export class IntegrationService {
   private storage = UploadFactory.createStorage();
@@ -266,6 +315,38 @@ export class IntegrationService {
     await this._integrationRepository.purgeVideoSnapshots(
       dayjs().utc().subtract(HOURLY_RETENTION_DAYS, 'day').toDate()
     );
+  }
+
+  /**
+   * Views gained hour by hour across every tracked video of a channel.
+   *
+   * The variation is per video — two videos are two independent counters and
+   * subtracting across them would be meaningless — so the series are computed
+   * separately and only then summed on the hour.
+   */
+  private async viewsHeatmap(integrationId: string) {
+    const snapshots = await this._integrationRepository.getVideoSnapshots(
+      integrationId,
+      dayjs().utc().subtract(HOURLY_RETENTION_DAYS, 'day').toDate()
+    );
+
+    const byVideo = new Map<string, { capturedAt: Date; views: number }[]>();
+    for (const snapshot of snapshots) {
+      const readings = byVideo.get(snapshot.videoId) || [];
+      readings.push(snapshot);
+      byVideo.set(snapshot.videoId, readings);
+    }
+
+    const totals = new Map<string, number>();
+    for (const readings of byVideo.values()) {
+      for (const point of toHourlyDeltas(readings)) {
+        totals.set(point.at, (totals.get(point.at) || 0) + point.value);
+      }
+    }
+
+    return Array.from(totals.entries())
+      .map(([at, value]) => ({ at, value }))
+      .sort((a, b) => a.at.localeCompare(b.at));
   }
 
   async changeActiveCron(orgId: string) {
@@ -616,6 +697,17 @@ export class IntegrationService {
           ),
           +date
         );
+
+        // Built here rather than in enrichAnalytics: that one is also called by
+        // the snapshot sweep, which has no use for a heatmap. A failure must not
+        // cost the whole screen, so it degrades to no card at all.
+        try {
+          const hourly = await this.viewsHeatmap(getIntegration.id);
+          if (hourly.length) {
+            loadAnalytics.push({ label: 'Views by Day and Hour', data: [], hourly });
+          }
+        } catch (e) {}
+
         await ioRedis.set(
           `integration:${org.id}:${integration}:${date}`,
           JSON.stringify(loadAnalytics),

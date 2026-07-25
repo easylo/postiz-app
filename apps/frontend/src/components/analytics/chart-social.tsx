@@ -19,12 +19,17 @@ function mergeDataPoints(data: TotalList[], numPoints: number): TotalList[] {
 export const ChartSocial: FC<{
   data: TotalList[];
   color?: 'purple' | 'green' | 'blue';
+  /**
+   * How many buckets the series is squeezed into. Seven suits a sparkline, but
+   * an hourly curve needs far more before it stops being a straight line.
+   */
+  points?: number;
 }> = (props) => {
-  const { data, color = 'purple' } = props;
+  const { data, color = 'purple', points = 7 } = props;
   const [mode] = useCookie('mode', 'dark');
 
   const list = useMemo(() => {
-    const merged = data.length < 7 ? data : mergeDataPoints(data, 7);
+    const merged = data.length < points ? data : mergeDataPoints(data, points);
     if (merged.length === 1) {
       return [
         // duplicating single datapoints metrics for chart to display a line on analytics
@@ -33,7 +38,7 @@ export const ChartSocial: FC<{
       ];
     }
     return merged;
-  }, [data]);
+  }, [data, points]);
 
   const ref = useRef<any>(null);
   const chart = useRef<null | DrawChart>(null);

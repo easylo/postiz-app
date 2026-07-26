@@ -166,7 +166,12 @@ const DeltaLine: FC<{ item: AnalyticsDataItem }> = ({ item }) => {
   // the card assert "No change" about metrics it had not measured. A gauge
   // whose date the payload cannot back up is the same case: there is no honest
   // day to point the reader at.
+  // `readings` is the tell for a payload computed before this shipped: the
+  // server has always sent it since, so its absence means none of the other
+  // fields can be trusted either — including an accrued `percentageChange`
+  // that still holds the old sum-of-halves value.
   if (
+    item.readings === undefined ||
     change === undefined ||
     !Number.isFinite(change) ||
     (item.gauge && !from)

@@ -17,14 +17,22 @@ const cellOpacity = (value: number, max: number) =>
  * timezones offset by half an hour.
  */
 export const HeatmapGrid: FC<{
-  points: Array<{ at: string; value: number }>;
+  points: Array<{ at: string; value: number; estimated?: boolean }>;
 }> = ({ points }) => {
   const grid = useMemo(() => {
-    const cells = Array.from({ length: 7 }, () => new Array(24).fill(0));
+    const cells = Array.from({ length: 7 }, () =>
+      Array.from({ length: 24 }, () => ({ value: 0, estimated: false }))
+    );
 
     for (const point of points) {
       const at = new Date(point.at);
-      cells[at.getDay()][at.getHours()] += point.value;
+      const cell = cells[at.getDay()][at.getHours()];
+      cell.value += point.value;
+      // An hour is inferred as soon as anything inferred landed in it: a sweep
+      // that skipped a night spreads that night's gain across hours nobody
+      // measured, and drawing them like the rest is how a chart invents an
+      // audience at 4am.
+      cell.estimated = cell.estimated || !!point.estimated;
     }
 
     return cells;
@@ -32,8 +40,15 @@ export const HeatmapGrid: FC<{
 
   // The ramp divides by the peak so it has to floor at 1, but the legend must
   // name the reading that was actually taken — on a quiet week that is 0.
-  const peak = useMemo(() => Math.max(...grid.flat(), 0), [grid]);
+  const peak = useMemo(
+    () => Math.max(...grid.flat().map((cell) => cell.value), 0),
+    [grid]
+  );
   const max = Math.max(peak, 1);
+  const anyEstimated = useMemo(
+    () => grid.flat().some((cell) => cell.estimated),
+    [grid]
+  );
 
   return (
     <div className="px-[16px] pb-[14px] overflow-x-auto">
@@ -53,13 +68,25 @@ export const HeatmapGrid: FC<{
             <div className="w-[36px] text-[11px] text-newTableText">
               {DAYS[day]}
             </div>
-            {row.map((value, hour) => (
+            {row.map((cell, hour) => (
               <div
                 key={hour}
-                title={`${DAYS[day]} ${hour}:00 — ${value.toLocaleString()}`}
-                className="flex-1 h-[18px] rounded-[3px] bg-[#612bd3]"
-                style={{ opacity: cellOpacity(value, max) }}
-              />
+                title={`${DAYS[day]} ${hour}:00 — ${cell.value.toLocaleString()}${
+                  cell.estimated ? ' (estimated)' : ''
+                }`}
+                // The ring rides the card surface across the 3px gap rather
+                // than the fill, so its contrast does not follow the opacity
+                // ramp — the same reason the gain tape marks its inferred
+                // buckets this way.
+                className={`flex-1 h-[18px] rounded-[3px] ${
+                  cell.estimated ? 'border-2 border-newTableText' : ''
+                }`}
+              >
+                <div
+                  className="w-full h-full rounded-[2px] bg-[#612bd3]"
+                  style={{ opacity: cellOpacity(cell.value, max) }}
+                />
+              </div>
             ))}
           </div>
         ))}
@@ -75,6 +102,16 @@ export const HeatmapGrid: FC<{
             />
           ))}
           <span className="tabular-nums">{peak.toLocaleString()}</span>
+          {/* Only when the grid actually holds one: a legend for a mark that is
+              nowhere on screen teaches the reader to look for a distinction
+              that does not exist here. */}
+          {anyEstimated && (
+            <>
+              <span className="w-[10px]" />
+              <span className="w-[14px] h-[14px] rounded-[3px] border-2 border-newTableText flex-none" />
+              <span>estimated</span>
+            </>
+          )}
         </div>
       </div>
     </div>

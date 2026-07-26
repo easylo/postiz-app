@@ -145,15 +145,21 @@ const withPercentageChange = (analytics: AnalyticsData[]): AnalyticsData[] =>
     const after = mean(values.slice(middle));
     const periodChange = after - before;
 
-    const change = metric.average
+    // A relative change against a baseline of zero cannot be expressed, and
+    // reporting it as 0 is worse than reporting nothing: the client renders a
+    // zero as the words "no change", which is a claim about a measurement that
+    // was never possible. X pads every one of its series with a fabricated
+    // leading zero row, so this is not a corner case — it is every X card, on
+    // every load, and a brand-new channel whose first half is empty besides.
+    const relative = metric.average
       ? periodChange
       : before === 0
-      ? 0
+      ? undefined
       : (periodChange / before) * 100;
 
     return {
       ...metric,
-      percentageChange: round(change),
+      ...(relative === undefined ? {} : { percentageChange: round(relative) }),
       readings: points.length,
     };
   });

@@ -666,6 +666,7 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
       acc.push({
         label: 'Average View Percentage',
         average: true,
+        percentage: true,
         data: mappedData?.map((p: any) => ({
           total: p.averageViewPercentage,
           date: p.day,

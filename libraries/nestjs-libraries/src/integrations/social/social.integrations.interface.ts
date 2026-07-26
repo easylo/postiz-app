@@ -80,6 +80,23 @@ export interface AnalyticsData {
    */
   average?: boolean;
   /**
+   * Set when the metric is a level read at a point in time — followers, total
+   * likes, a video count — rather than an amount accrued over the period.
+   * Summing successive readings of a level is meaningless: three readings of
+   * four followers are not twelve followers. The UI shows the latest instead.
+   *
+   * Not set by providers: IntegrationService marks the metrics it stitches a
+   * history onto, which are gauges by construction — a provider that returns a
+   * single point is reporting a level, not a series.
+   */
+  gauge?: boolean;
+  /**
+   * Set when the value is a percentage and should be rendered with a `%`.
+   * Distinct from `average`: an average view duration is a mean measured in
+   * seconds, and labelling it a percentage makes it nonsense.
+   */
+  percentage?: boolean;
+  /**
    * Computed centrally from `data` in IntegrationService.checkAnalytics.
    * Providers do not need to set it.
    */

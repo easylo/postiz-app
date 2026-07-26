@@ -11,7 +11,9 @@ function mergeDataPoints(data: TotalList[], numPoints: number): TotalList[] {
   return res.map((row) => {
     return {
       date: `${row[0].date} - ${row?.at(-1)?.date}`,
-      total: row.reduce((acc, curr) => acc + curr.total, 0),
+      // Coerced: the analytics API sends totals as strings, and `+` would
+      // concatenate them into a number several digits too long.
+      total: row.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0),
     };
   });
 }
@@ -137,7 +139,7 @@ export const ChartSocial: FC<{
             label: 'Total',
             backgroundColor: gradient,
             fill: true,
-            data: list.map((row) => row.total),
+            data: list.map((row) => Number(row.total) || 0),
             tension: 0.4,
             pointRadius: 0,
             pointHoverRadius: 6,

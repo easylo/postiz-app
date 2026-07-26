@@ -1075,30 +1075,35 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         }
 
         // These four aggregate the sliding window fetched above, not the
-        // lifetime account counters pushed earlier. The label says so, since
-        // both families end up side by side in the same grid.
+        // lifetime account counters pushed earlier — hence "recent videos",
+        // since both families end up side by side in the same grid.
+        //
+        // The window size is deliberately NOT in the label. It grows with the
+        // account, and the stored history is keyed by label: "Likes (last 9
+        // videos)" becoming "(last 10 videos)" split one series into two and
+        // restarted the chart from nothing.
         const windowSize = videoDetails.length;
 
         result.push({
-          label: `Views (last ${windowSize} videos)`,
+          label: 'Views (recent videos)',
           percentageChange: 0,
           data: [{ total: String(totalViews), date: today }],
         });
 
         result.push({
-          label: `Likes (last ${windowSize} videos)`,
+          label: 'Likes (recent videos)',
           percentageChange: 0,
           data: [{ total: String(totalLikes), date: today }],
         });
 
         result.push({
-          label: `Comments (last ${windowSize} videos)`,
+          label: 'Comments (recent videos)',
           percentageChange: 0,
           data: [{ total: String(totalComments), date: today }],
         });
 
         result.push({
-          label: `Shares (last ${windowSize} videos)`,
+          label: 'Shares (recent videos)',
           percentageChange: 0,
           data: [{ total: String(totalShares), date: today }],
         });
@@ -1110,6 +1115,7 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
           result.push({
             label: 'Engagement Rate',
             average: true,
+            percentage: true,
             percentageChange: 0,
             data: [{ total: engagementRate.toFixed(2), date: today }],
           });

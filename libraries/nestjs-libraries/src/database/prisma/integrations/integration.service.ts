@@ -235,7 +235,10 @@ export class IntegrationService {
           ...metric.data,
         ].sort((a, b) => a.date.localeCompare(b.date));
 
-        return { ...metric, data };
+        // Marked a gauge here rather than by each provider: reaching this
+        // branch means the provider returned a single point, which is a level
+        // read now, not an amount accrued over the window.
+        return { ...metric, data, gauge: true };
       });
     } catch (e) {
       return analytics;

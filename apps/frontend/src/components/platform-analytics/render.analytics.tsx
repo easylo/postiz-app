@@ -13,8 +13,12 @@ import { HeatmapGrid } from '@gitroom/frontend/components/platform-analytics/hea
 
 interface AnalyticsDataItem {
   label: string;
-  data: Array<{ total: number; date: string }>;
+  // The API sends totals as strings. Typing them as numbers is what let a
+  // string concatenation pass for an addition all the way to the screen.
+  data: Array<{ total: string | number; date: string }>;
   average?: boolean;
+  gauge?: boolean;
+  percentage?: boolean;
   percentageChange?: number;
   breakdown?: Array<{ key: string; value: number }>;
   videos?: AnalyticsVideoRow[];
@@ -279,15 +283,31 @@ export const RenderAnalytics: FC<{
 
   const totals = useMemo(() => {
     return data?.map((p: AnalyticsDataItem) => {
-      const value =
-        (p?.data.reduce(
-          (acc: number, curr: { total: number }) => acc + curr.total,
-          0
-        ) || 0) / (p.average ? p.data.length : 1);
-      if (p.average) {
-        return value.toFixed(2) + '%';
+      // The API sends every total as a string. `+` on strings concatenates, so
+      // three readings of "4" followers used to render as 444, and a rate came
+      // out as NaN once it had more than one point. Coerce before adding.
+      const points = (p?.data || [])
+        .map((d) => Number(d.total))
+        .filter((n) => !isNaN(n));
+
+      if (!points.length) {
+        return p.percentage ? '0.00%' : '0';
       }
-      return new Intl.NumberFormat().format(Math.round(value));
+
+      const sum = points.reduce((acc, curr) => acc + curr, 0);
+      const value = p.gauge
+        ? // A level, not an amount accrued: three readings of four followers
+          // are not twelve followers. The latest reading is the answer.
+          points[points.length - 1]
+        : p.average
+        ? sum / points.length
+        : sum;
+
+      // `average` says how to aggregate; `percentage` says how to render. An
+      // average view duration is a mean measured in seconds, not a percentage.
+      return p.percentage
+        ? value.toFixed(2) + '%'
+        : new Intl.NumberFormat().format(Math.round(value));
     });
   }, [data]);
 

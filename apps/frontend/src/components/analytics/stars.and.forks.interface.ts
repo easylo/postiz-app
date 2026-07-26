@@ -3,7 +3,10 @@ export interface StarsList {
   date: string;
 }
 export interface TotalList {
-  total: number;
+  // The analytics API sends totals as strings; ChartSocial coerces before it
+  // adds or plots them. Typing this as a number is what let a concatenation
+  // pass for an addition.
+  total: string | number;
   date: string;
 }
 export interface ForksList {

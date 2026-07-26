@@ -44,4 +44,6 @@ job horaire sont couverts par le même changement) :
 
 ## Vérification
 
-Lint depuis la racine (`pnpm`). Pas de tests existants sur ce provider.
+`pnpm run build:backend` depuis la racine (aucun script lint racine n'existe,
+et le dépôt ne contient aucun test — on ne crée pas d'infrastructure de test
+pour un helper privé).

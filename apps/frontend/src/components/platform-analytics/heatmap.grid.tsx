@@ -1,4 +1,5 @@
 import { FC, useMemo } from 'react';
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -19,6 +20,7 @@ const cellOpacity = (value: number, max: number) =>
 export const HeatmapGrid: FC<{
   points: Array<{ at: string; value: number; estimated?: boolean }>;
 }> = ({ points }) => {
+  const t = useT();
   const grid = useMemo(() => {
     const cells = Array.from({ length: 7 }, () =>
       Array.from({ length: 24 }, () => ({ value: 0, estimated: false }))
@@ -72,7 +74,9 @@ export const HeatmapGrid: FC<{
               <div
                 key={hour}
                 title={`${DAYS[day]} ${hour}:00 — ${cell.value.toLocaleString()}${
-                  cell.estimated ? ' (estimated)' : ''
+                  cell.estimated
+                    ? ` (${t('gain_tape_estimated', 'estimated')})`
+                    : ''
                 }`}
                 // The ring rides the card surface across the 3px gap rather
                 // than the fill, so its contrast does not follow the opacity
@@ -109,7 +113,7 @@ export const HeatmapGrid: FC<{
             <>
               <span className="w-[10px]" />
               <span className="w-[14px] h-[14px] rounded-[3px] border-2 border-newTableText flex-none" />
-              <span>estimated</span>
+              <span>{t('gain_tape_legend_estimated', 'Estimated')}</span>
             </>
           )}
         </div>

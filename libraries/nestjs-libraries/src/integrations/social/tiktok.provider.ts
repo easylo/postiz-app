@@ -805,7 +805,10 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         privacy_level: 'SELF_ONLY',
         content_posting_method: 'UPLOAD',
       },
-      note: 'TikTok refused a direct post (app pending audit). The video was sent to your TikTok inbox and is NOT published — finish it in the TikTok app within 24 hours or it is discarded.',
+      // The outcome of this rung — the drop into the inbox — is stated by the
+      // attempt itself, along with the provider reference. This note carries
+      // only the reason we ended up here.
+      note: 'TikTok refused a direct post (app pending audit).',
     },
   ];
 
@@ -855,7 +858,14 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
             integration
           );
 
-          return [{ ...result, note: fallback.note }];
+          // Both notes matter: the rung that was taken, and the provider
+          // reference the attempt came back with. Joined rather than replaced.
+          return [
+            {
+              ...result,
+              note: [fallback.note, result.note].filter(Boolean).join(' '),
+            },
+          ];
         } catch (retry) {
           // Only keep climbing down while TikTok keeps refusing for the same
           // reason. Anything else is a real failure and belongs to the caller.
@@ -929,6 +939,20 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
         releaseURL: url,
         postId: String(videoId),
         status: 'success',
+        // A video dropped in the inbox has no public id yet, so postId stays the
+        // 'missing' sentinel — it is what drives the "pick which video this
+        // became" recovery flow and the calendar affordance behind it. But
+        // discarding TikTok's publish_id along with it left nothing to ask
+        // status/fetch about afterwards, which is exactly what a video that
+        // never reached the inbox needs. The reference rides on the note.
+        ...(videoId === 'missing'
+          ? {
+              note:
+                'Sent to the TikTok inbox and NOT published — finish it in the ' +
+                'TikTok app within 24 hours or it is discarded. ' +
+                `TikTok reference: ${publish_id}`,
+            }
+          : {}),
       },
     ];
   }

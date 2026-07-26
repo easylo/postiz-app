@@ -29,6 +29,10 @@ const ALLOWED_MIME_TYPES = new Set<string>([
 
 class CloudflareStorage implements IUploadProvider {
   private _client: S3Client;
+  // Optional key prefix, so several apps can share one bucket without colliding
+  // (e.g. `postiz/` next to other folders). Empty by default: keys stay at the
+  // bucket root, exactly as before.
+  private _prefix: string;
 
   constructor(
     accountID: string,
@@ -36,8 +40,10 @@ class CloudflareStorage implements IUploadProvider {
     secretKey: string,
     private region: string,
     private _bucketName: string,
-    private _uploadUrl: string
+    private _uploadUrl: string,
+    prefix = ''
   ) {
+    this._prefix = prefix ? prefix.replace(/^\/+|\/+$/g, '') + '/' : '';
     this._client = new S3Client({
       endpoint: `https://${accountID}.r2.cloudflarestorage.com`,
       region,
@@ -103,7 +109,7 @@ class CloudflareStorage implements IUploadProvider {
 
     const params = {
       Bucket: this._bucketName,
-      Key: `${id}.${extension}`,
+      Key: `${this._prefix}${id}.${extension}`,
       Body: body,
       ContentType: safeContentType,
       ChecksumMode: 'DISABLED',
@@ -112,7 +118,7 @@ class CloudflareStorage implements IUploadProvider {
     const command = new PutObjectCommand({ ...params });
     await this._client.send(command);
 
-    return `${this._uploadUrl}/${id}.${extension}`;
+    return `${this._uploadUrl}/${this._prefix}${id}.${extension}`;
   }
 
   async uploadFile(file: Express.Multer.File): Promise<any> {
@@ -129,7 +135,7 @@ class CloudflareStorage implements IUploadProvider {
       const command = new PutObjectCommand({
         Bucket: this._bucketName,
         ACL: 'public-read',
-        Key: `${id}.${extension}`,
+        Key: `${this._prefix}${id}.${extension}`,
         Body: file.buffer,
         ContentType: safeContentType,
       });
@@ -143,8 +149,8 @@ class CloudflareStorage implements IUploadProvider {
         buffer: file.buffer,
         originalname: `${id}.${extension}`,
         fieldname: 'file',
-        path: `${this._uploadUrl}/${id}.${extension}`,
-        destination: `${this._uploadUrl}/${id}.${extension}`,
+        path: `${this._uploadUrl}/${this._prefix}${id}.${extension}`,
+        destination: `${this._uploadUrl}/${this._prefix}${id}.${extension}`,
         encoding: '7bit',
         stream: file.buffer as any,
       };

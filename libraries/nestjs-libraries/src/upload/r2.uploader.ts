@@ -43,6 +43,12 @@ const {
   CLOUDFLARE_BUCKET_URL,
 } = process.env;
 
+// Même préfixe que CloudflareStorage : les gros fichiers passent par le multipart,
+// ils doivent atterrir au même endroit que les petits.
+const PREFIX = process.env.CLOUDFLARE_PREFIX
+  ? process.env.CLOUDFLARE_PREFIX.replace(/^\/+|\/+$/g, '') + '/'
+  : '';
+
 const R2 = new S3Client({
   region: 'auto',
   endpoint: `https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -94,7 +100,7 @@ export async function simpleUpload(
 
   const params = {
     Bucket: CLOUDFLARE_BUCKETNAME,
-    Key: randomFilename,
+    Key: PREFIX + randomFilename,
     Body: data,
     ContentType: safeContentType,
   };
@@ -102,7 +108,7 @@ export async function simpleUpload(
   const command = new PutObjectCommand({ ...params });
   await R2.send(command);
 
-  return CLOUDFLARE_BUCKET_URL + '/' + randomFilename;
+  return CLOUDFLARE_BUCKET_URL + '/' + PREFIX + randomFilename;
 }
 
 export async function createMultipartUpload(req: Request, res: Response) {
@@ -117,7 +123,7 @@ export async function createMultipartUpload(req: Request, res: Response) {
   try {
     const params = {
       Bucket: CLOUDFLARE_BUCKETNAME,
-      Key: `${randomFilename}`,
+      Key: `${PREFIX}${randomFilename}`,
       ContentType: safeContentType,
       Metadata: {
         'x-amz-meta-file-hash': fileHash,

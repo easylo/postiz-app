@@ -102,6 +102,30 @@ export interface AnalyticsData {
    */
   percentageChange?: number;
   /**
+   * The same variation in the metric's own unit — followers, views, points of
+   * a rate. It is what the UI leads with: a channel that gained four followers
+   * gained four followers, while `+100%` says more about how small the starting
+   * point was than about the week.
+   *
+   * Computed centrally alongside `percentageChange`, from the same two
+   * readings, so the client never has to derive a second delta that would
+   * disagree with the first. Providers do not need to set it.
+   */
+  absoluteChange?: number;
+  /**
+   * Date of the earliest reading the change was measured from, so the UI can
+   * name the period instead of implying the change happened since forever.
+   * Absent when there is nothing to compare against.
+   */
+  changeFrom?: string;
+  /**
+   * How many usable readings the series holds. A metric never read, one read
+   * once and one genuinely unchanged all produce a change of zero, and only
+   * this count tells them apart — which is the difference between "no change"
+   * and "no data" on screen.
+   */
+  readings?: number;
+  /**
    * Ranked distribution rather than a time series — top countries, traffic
    * sources, devices. Mutually exclusive with `data`: a metric carries either
    * a series to chart or a breakdown to rank, never both.
@@ -118,8 +142,15 @@ export interface AnalyticsData {
    * it into a day-by-hour grid in its own timezone — which is why the raw
    * series travels rather than a ready-made grid: a server-side axis rotation
    * would be wrong for the timezones offset by half an hour.
+   *
+   * `estimated` is set on an hour whose gain was inferred rather than read:
+   * the sweep missed a run, and the gain straddling the gap was spread over
+   * the hours it covered. One video contributing an inferred point is enough,
+   * since the sum then stops being a measurement. It cannot be recovered from
+   * the value — a gain spread thin is indistinguishable from a small one that
+   * really happened — so it has to travel for the grid to mark those cells.
    */
-  hourly?: Array<{ at: string; value: number }>;
+  hourly?: Array<{ at: string; value: number; estimated?: boolean }>;
 }
 
 

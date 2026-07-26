@@ -57,45 +57,105 @@ const VIDEO_HISTORY_WINDOW_DAYS = 180;
 const MAX_SPREAD_HOURS = 2;
 
 /**
- * Fills in `percentageChange` for every metric, comparing the first half of the
- * series against the second one.
+ * Fills in the variation of every metric, and what it was computed from.
  *
  * Providers used to hardcode this value (0, and 5 for a few of them), so the
  * trend arrow in the UI was decorative. Computing it here keeps it generic: any
  * provider returning at least two data points gets a real trend, with no
  * provider-specific code.
  *
- * Rates and averages (`average: true`) are compared as means and the result is
- * a difference in points, which is what the UI renders as `pp`. Counters are
- * compared as sums and the result is a relative percentage.
+ * Two series arrive here and they cannot be compared the same way:
+ *
+ * - A **gauge** — every metric this service stitches a history onto — is a
+ *   level read once a day. It is compared last against first, and nothing else:
+ *   halving `4, 4, 4` into `4` against `4 + 4` reports a follower count that
+ *   never moved as having doubled.
+ * - Everything else is an amount accrued day by day, the way YouTube reports
+ *   it. There the first half of the window against the second is meaningful,
+ *   because it compares two periods rather than two instants. The two halves
+ *   are compared by their mean rather than their total, because they are not
+ *   the same length: provider windows include both endpoints, so 30 days come
+ *   back as 31 rows and the extra one falls in the second half. Summing would
+ *   report a channel sitting at a flat 1,000 views a day as up a full day's
+ *   worth on a window where it did not move by a single view.
+ *
+ * Rates are a difference in points rather than a relative percentage — `pp` in
+ * the UI. On a gauge that is keyed off `percentage`, not `average`: an average
+ * view count per video is a mean measured in views, and reporting its move as
+ * points of a percentage is nonsense.
+ *
+ * Only a gauge has a level that can have changed since a date, so only a gauge
+ * carries `absoluteChange` and `changeFrom`. On an accrued series the gap
+ * between the halves means "the recent days out-earned the early ones by 14" —
+ * there is no reading anywhere in the window that was 14 lower — and a client
+ * handed that number can only print it as "+14 since 18 Jul", which is a
+ * sentence about a level nobody ever recorded. It gets the relative move and
+ * nothing else.
+ *
+ * The reading count travels on both paths: a metric never read and one that
+ * truly did not move both report no movement, and only the count tells them
+ * apart.
  */
 const withPercentageChange = (analytics: AnalyticsData[]): AnalyticsData[] =>
   (analytics || []).map((metric) => {
+    // Dates ride along with the values: an unparseable row drops out, and
+    // `changeFrom` has to name the reading actually compared rather than
+    // whatever sits at the same index in the untouched series.
     const points = (metric?.data || [])
-      .map((p) => Number(p?.total))
-      .filter((n) => !isNaN(n));
+      .map((p) => ({ value: Number(p?.total), date: p?.date }))
+      .filter((p) => !isNaN(p.value));
 
     if (points.length < 2) {
-      return { ...metric, percentageChange: 0 };
+      return { ...metric, percentageChange: 0, readings: points.length };
     }
 
-    const middle = Math.floor(points.length / 2);
-    const first = points.slice(0, middle);
-    const second = points.slice(middle);
+    const values = points.map((p) => p.value);
 
-    const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+    // Two decimals rather than one: an engagement rate moves by 0.07 points and
+    // a single decimal rounds that to a tenth it never reached. It also keeps
+    // float noise off a flat gauge, where 4.69 against 4.69 would otherwise
+    // leave a change of 1e-15 and the UI would call it a move.
+    const round = (value: number) => Math.round(value * 100) / 100;
 
-    const before = metric.average ? sum(first) / first.length : sum(first);
-    const after = metric.average ? sum(second) / second.length : sum(second);
+    if (metric.gauge) {
+      const before = values[0];
+      const after = values[values.length - 1];
+      const absoluteChange = after - before;
 
-    // A rate moves in points; a counter moves relative to where it started.
+      const change = metric.percentage
+        ? absoluteChange
+        : before === 0
+        ? 0
+        : (absoluteChange / before) * 100;
+
+      return {
+        ...metric,
+        percentageChange: round(change),
+        absoluteChange: round(absoluteChange),
+        changeFrom: points[0].date,
+        readings: points.length,
+      };
+    }
+
+    const mean = (list: number[]) =>
+      list.reduce((a, b) => a + b, 0) / list.length;
+
+    const middle = Math.floor(values.length / 2);
+    const before = mean(values.slice(0, middle));
+    const after = mean(values.slice(middle));
+    const periodChange = after - before;
+
     const change = metric.average
-      ? after - before
+      ? periodChange
       : before === 0
       ? 0
-      : ((after - before) / before) * 100;
+      : (periodChange / before) * 100;
 
-    return { ...metric, percentageChange: Math.round(change * 10) / 10 };
+    return {
+      ...metric,
+      percentageChange: round(change),
+      readings: points.length,
+    };
   });
 
 /**
@@ -113,7 +173,11 @@ const withPercentageChange = (analytics: AnalyticsData[]): AnalyticsData[] =>
  *   hour the job came back and inventing a peak there.
  *
  * That spreading is a smoothing, not a measurement: if the sweep skipped a
- * night, the grid will show activity at 4am that nobody actually produced.
+ * night, the grid will show activity at 4am that nobody actually produced. The
+ * points it invents are tagged `estimated` so a client can mark them as such,
+ * and the tag has to travel: it cannot be recovered from the value downstream,
+ * because a gain of two over a two-hour gap spreads to exactly `1` an hour and
+ * is then indistinguishable from an hour that really was measured.
  *
  * `value` is left fractional on purpose: this helper runs once per video, and
  * rounding here before the channel-wide sum either erases a small gain (0.33
@@ -122,15 +186,17 @@ const withPercentageChange = (analytics: AnalyticsData[]): AnalyticsData[] =>
  *
  * `maxSpreadHours` caps how big a gap is still treated as hourly. Past it, the
  * readings are daily sediment rather than a missed run, and spreading would
- * invent a resolution nobody measured. The default spreads every gap: callers
+ * invent a resolution nobody measured — so the gain lands on one point, tagged
+ * `estimated` all the same, because collapsing hours into one bucket is as much
+ * an inference as spreading them out. The default spreads every gap: callers
  * reading only within the hourly retention window have no daily-sediment gaps
  * to worry about.
  */
 const toHourlyDeltas = (
   snapshots: { capturedAt: Date; views: number }[],
   maxSpreadHours = Infinity
-): Array<{ at: string; value: number }> => {
-  const points: Array<{ at: string; value: number }> = [];
+): Array<{ at: string; value: number; estimated?: boolean }> => {
+  const points: Array<{ at: string; value: number; estimated?: boolean }> = [];
 
   for (let i = 1; i < snapshots.length; i++) {
     const previous = snapshots[i - 1];
@@ -148,7 +214,15 @@ const toHourlyDeltas = (
     // hourly retention only the midnight row survives, so spreading a whole
     // day's gain over 24 points would claim a resolution we do not have.
     if (hours > maxSpreadHours) {
-      points.push({ at: current.capturedAt.toISOString(), value: gained });
+      points.push({
+        at: current.capturedAt.toISOString(),
+        value: gained,
+        // Inferred every bit as much as a spread point: a whole day of views
+        // piled onto the hour the sweep resumed is not a reading of that hour,
+        // and being the largest it is exactly the point a chart picks out to
+        // label. Untagged, that label is an artifact drawn as a measurement.
+        estimated: true,
+      });
       continue;
     }
 
@@ -161,6 +235,10 @@ const toHourlyDeltas = (
           current.capturedAt.getTime() - (hour - 1) * 3600000
         ).toISOString(),
         value: perHour,
+        // Only a gap needs the tag; a single hour between two readings is the
+        // measurement itself, and flagging it would cost a byte per point on
+        // the payload the day-by-hour grid already sends by the hundred.
+        ...(hours > 1 && { estimated: true }),
       });
     }
   }
@@ -361,6 +439,20 @@ export class IntegrationService {
    * The variation is per video — two videos are two independent counters and
    * subtracting across them would be meaningless — so the series are computed
    * separately and only then summed on the hour.
+   *
+   * An hour is reported as `estimated` as soon as one video contributed an
+   * inferred point to it: the sum of a measurement and a guess is a guess. The
+   * grid is read as a habit — "this channel earns views at 4am" — so an hour
+   * nobody measured must not be drawn as one that was.
+   *
+   * No `maxSpreadHours` here, unlike the single-video curve. A gap inside this
+   * window is a missed run rather than the daily sediment the cap guards
+   * against, because the purge only thins readings older than the window this
+   * reads. Capping would drop a whole outage's gain on the single hour the
+   * sweep resumed, and that one cell sets the colour ramp for all 168: a
+   * three-day gap would leave every genuinely measured hour washed out to
+   * near-empty. Spread over the hours it spans, the same error stays local to
+   * them and, being tagged, stays legible as an error.
    */
   private async viewsHeatmap(integrationId: string) {
     const snapshots = await this._integrationRepository.getVideoSnapshots(
@@ -375,15 +467,25 @@ export class IntegrationService {
       byVideo.set(snapshot.videoId, readings);
     }
 
-    const totals = new Map<string, number>();
+    const totals = new Map<string, { value: number; estimated: boolean }>();
     for (const readings of byVideo.values()) {
       for (const point of toHourlyDeltas(readings)) {
-        totals.set(point.at, (totals.get(point.at) || 0) + point.value);
+        const total = totals.get(point.at) || { value: 0, estimated: false };
+        total.value += point.value;
+        total.estimated = total.estimated || !!point.estimated;
+        totals.set(point.at, total);
       }
     }
 
     return Array.from(totals.entries())
-      .map(([at, value]) => ({ at, value: Math.round(value) }))
+      .map(([at, total]) => ({
+        at,
+        value: Math.round(total.value),
+        // Omitted rather than sent as `false`, like the per-video points it is
+        // summed from: the grid travels by the hundred and only the hours that
+        // were inferred have anything to say.
+        ...(total.estimated && { estimated: true }),
+      }))
       .sort((a, b) => a.at.localeCompare(b.at));
   }
 

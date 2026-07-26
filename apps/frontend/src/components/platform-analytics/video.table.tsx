@@ -1,7 +1,11 @@
 import { FC, Fragment, useCallback, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
-import { ChartSocial } from '@gitroom/frontend/components/analytics/chart-social';
+import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import {
+  GainTape,
+  GainTapePoint,
+} from '@gitroom/frontend/components/platform-analytics/gain.tape';
 
 export type AnalyticsVideoRow = {
   id: string;
@@ -62,83 +66,185 @@ const useVideoHistory = (integrationId: string, videoId: string) => {
   );
 };
 
-const VideoHistory: FC<{ integrationId: string; videoId: string }> = ({
-  integrationId,
-  videoId,
-}) => {
+// The tape folds from hourly cells to daily ones past three days, and this
+// sentence has to count the holes in the tape the reader is looking at, so it
+// has to fold on the same boundary.
+const HOURLY_SPAN_LIMIT = 72 * 60 * 60 * 1000;
+
+const startOfBucket = (at: Date, daily: boolean) => {
+  const floor = new Date(at);
+  floor.setMinutes(0, 0, 0);
+  if (daily) {
+    floor.setHours(0);
+  }
+  return floor;
+};
+
+const dayLabel = (at: Date) =>
+  at.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+
+// A reading spread across a gap arrives as a fraction — a gain of 1 over three
+// missed hours is 0.33 an hour — so only the display is rounded. Rounding the
+// values themselves is what turned a genuine +1 into three zeros.
+const formatGain = (value: number) =>
+  (Math.round(value * 100) / 100).toLocaleString();
+
+/**
+ * What this video gained since the sweep started watching it.
+ *
+ * The payload is deltas only — the server drops the first snapshot because a
+ * level has no predecessor to be a gain over — so the running total cannot come
+ * from it and is taken from the row instead. The sentence carries the finding,
+ * the tape underneath is the evidence it was measured rather than assumed.
+ */
+const VideoHistory: FC<{
+  integrationId: string;
+  videoId: string;
+  views: number;
+}> = ({ integrationId, videoId, views }) => {
+  const t = useT();
   const { data, isLoading } = useVideoHistory(integrationId, videoId);
-  const [granularity, setGranularity] = useState<'hour' | 'day'>('hour');
 
-  const series = useMemo(() => {
-    const points: Array<{ at: string; value: number }> = data || [];
+  const summary = useMemo(() => {
+    const readings = (Array.isArray(data) ? (data as GainTapePoint[]) : [])
+      .map((point) => ({
+        at: new Date(point.at),
+        value: Number(point.value) || 0,
+      }))
+      .filter((point) => !isNaN(point.at.getTime()))
+      .sort((a, b) => a.at.getTime() - b.at.getTime());
 
-    if (granularity === 'hour') {
-      return points.map((point) => ({
-        date: new Date(point.at).toLocaleString(),
-        total: Math.round(point.value),
-      }));
+    if (!readings.length) {
+      return null;
     }
 
-    // The day view is this same payload regrouped, not a second request. The
-    // fractions are summed before rounding, so a gain spread across a missed
-    // run survives instead of vanishing into per-hour rounding.
-    const perDay = new Map<string, number>();
-    for (const point of points) {
-      const day = new Date(point.at).toLocaleDateString();
-      perDay.set(day, (perDay.get(day) || 0) + point.value);
+    const first = readings[0].at;
+    const last = readings[readings.length - 1].at;
+    const span = last.getTime() - first.getTime();
+    const daily = span > HOURLY_SPAN_LIMIT;
+
+    // Walked on the calendar rather than divided out of the span, so the 23-
+    // and 25-hour days around a DST change still count once each.
+    const covered = new Set(
+      readings.map((reading) => startOfBucket(reading.at, daily).getTime())
+    );
+    const cursor = startOfBucket(first, daily);
+    const end = startOfBucket(last, daily).getTime();
+    let buckets = 0;
+
+    while (cursor.getTime() <= end) {
+      buckets++;
+      if (daily) {
+        cursor.setDate(cursor.getDate() + 1);
+      } else {
+        cursor.setHours(cursor.getHours() + 1);
+      }
     }
 
-    return Array.from(perDay.entries()).map(([date, total]) => ({
-      date,
-      total: Math.round(total),
-    }));
-  }, [data, granularity]);
+    // Fractions are summed before they are shown, so a gain smeared over a
+    // missed run survives instead of disappearing a hundredth at a time.
+    const perDay = new Map<number, number>();
+    for (const reading of readings) {
+      const day = startOfBucket(reading.at, true).getTime();
+      perDay.set(day, (perDay.get(day) || 0) + reading.value);
+    }
+
+    return {
+      gain: readings.reduce((sum, reading) => sum + reading.value, 0),
+      readings: readings.length,
+      hours: Math.round(span / (60 * 60 * 1000)),
+      missing: buckets - covered.size,
+      daily,
+      days: Array.from(perDay.entries()).map(([at, value]) => ({
+        at: new Date(at),
+        value,
+      })),
+    };
+  }, [data]);
 
   if (isLoading) {
     return (
       <div className="py-[24px] text-center text-[13px] text-newTableText">
-        Loading…
+        {t('loading', 'Loading...')}
       </div>
     );
   }
 
-  if (!series.length) {
+  if (!summary) {
     return (
       <div className="py-[24px] text-center text-[13px] text-newTableText">
-        No reading yet — the hourly sweep needs at least two passes before a
-        variation can be drawn.
+        {t(
+          'video_history_no_reading',
+          'No reading yet — the hourly sweep needs at least two passes before a variation can be drawn.'
+        )}
       </div>
     );
   }
 
+  const span =
+    summary.hours < 48
+      ? t('video_history_span_hours', '{{hours}} h', { hours: summary.hours })
+      : t('video_history_span_days', '{{days}} d', {
+          days: Math.round(summary.hours / 24),
+        });
+
+  // Compared on the shown value, not the raw sum: a gain spread over a gap adds
+  // up to 0.999… as often as to 1, and both are one view to the reader.
+  const gain = Math.round(summary.gain * 100) / 100;
+
+  const headline =
+    gain <= 0
+      ? t('video_history_no_gain', 'No views gained in {{span}}', { span })
+      : gain === 1
+      ? t('video_history_gain_one', '+1 view in {{span}}', { span })
+      : t('video_history_gain', '+{{gain}} views in {{span}}', {
+          gain: formatGain(gain),
+          span,
+        });
+
+  const context = [
+    t('video_history_total_views', '{{total}} views total', {
+      total: views.toLocaleString(),
+    }),
+    t('video_history_readings', '{{readings}} readings', {
+      readings: summary.readings,
+    }),
+    ...(summary.missing > 0
+      ? [
+          summary.daily
+            ? t('video_history_missing_days', '{{missing}} days not measured', {
+                missing: summary.missing,
+              })
+            : t(
+                'video_history_missing_hours',
+                '{{missing}} hours not measured',
+                { missing: summary.missing }
+              ),
+        ]
+      : []),
+  ].join(' · ');
+
   return (
-    <div className="py-[12px]">
-      <div className="flex items-center gap-[8px] mb-[8px]">
-        {(['hour', 'day'] as const).map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => setGranularity(option)}
-            className={`px-[10px] py-[4px] text-[12px] rounded-[6px] transition-colors ${
-              granularity === option
-                ? 'bg-[#612bd3] text-white'
-                : 'bg-newTableHeader text-newTableText hover:text-white'
-            }`}
-          >
-            {option === 'hour' ? 'Hour' : 'Day'}
-          </button>
-        ))}
+    <div className="py-[12px] flex flex-col gap-[12px]">
+      <div>
+        <div className="text-[20px] leading-[26px] font-semibold tracking-tight">
+          {headline}
+        </div>
+        <div className="text-[13px] text-newTableText mt-[2px]">{context}</div>
       </div>
-      <div className="h-[160px]">
-        {/* ChartSocial builds its chart once and ignores later data changes,
-            so switching granularity has to remount it. */}
-        <ChartSocial
-          key={`${videoId}-${granularity}`}
-          data={series}
-          color="purple"
-          points={granularity === 'hour' ? 72 : 30}
-        />
-      </div>
+
+      <GainTape points={data} />
+
+      {/* Only while the tape is drawn in hours: past that its own cells are
+          already days, and a window that keeps 180 of them would restate every
+          one of them here. */}
+      {!summary.daily && summary.days.length > 1 && (
+        <div className="text-[12px] tabular-nums text-newTableText">
+          {summary.days
+            .map((day) => `${dayLabel(day.at)} +${formatGain(day.value)}`)
+            .join(' · ')}
+        </div>
+      )}
     </div>
   );
 };
@@ -271,9 +377,12 @@ export const VideoTable: FC<{
               {openId === video.id && (
                 <tr className="border-t border-newTableBorder">
                   <td colSpan={5}>
+                    {/* The history payload is deltas only, so the running
+                        total has to come from the row that owns it. */}
                     <VideoHistory
                       integrationId={integrationId}
                       videoId={video.id}
+                      views={video.views}
                     />
                   </td>
                 </tr>

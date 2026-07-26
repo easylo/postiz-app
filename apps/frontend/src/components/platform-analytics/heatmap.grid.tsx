@@ -2,6 +2,12 @@ import { FC, useMemo } from 'react';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+// Opacity rather than a colour scale: it keeps the empty cells readable against
+// both themes without a second palette. Shared with the legend below so the
+// swatches can never drift from the cells they claim to explain.
+const cellOpacity = (value: number, max: number) =>
+  value === 0 ? 0.06 : 0.15 + (value / max) * 0.85;
+
 /**
  * Views gained, laid out as day of week against hour of day.
  *
@@ -24,10 +30,10 @@ export const HeatmapGrid: FC<{
     return cells;
   }, [points]);
 
-  const max = useMemo(
-    () => Math.max(...grid.flat(), 1),
-    [grid]
-  );
+  // The ramp divides by the peak so it has to floor at 1, but the legend must
+  // name the reading that was actually taken — on a quiet week that is 0.
+  const peak = useMemo(() => Math.max(...grid.flat(), 0), [grid]);
+  const max = Math.max(peak, 1);
 
   return (
     <div className="px-[16px] pb-[14px] overflow-x-auto">
@@ -52,13 +58,24 @@ export const HeatmapGrid: FC<{
                 key={hour}
                 title={`${DAYS[day]} ${hour}:00 — ${value.toLocaleString()}`}
                 className="flex-1 h-[18px] rounded-[3px] bg-[#612bd3]"
-                // Opacity rather than a colour scale: it keeps the empty cells
-                // readable against both themes without a second palette.
-                style={{ opacity: value === 0 ? 0.06 : 0.15 + (value / max) * 0.85 }}
+                style={{ opacity: cellOpacity(value, max) }}
               />
             ))}
           </div>
         ))}
+        {/* The cells hide their value behind `title=`, which a touch or keyboard
+            user never reaches; the scale states the encoding on the page. */}
+        <div className="flex items-center gap-[4px] mt-[8px] pl-[36px] text-[10px] text-newTableText">
+          <span className="tabular-nums">0</span>
+          {[0, 1, 2, 3].map((step) => (
+            <div
+              key={step}
+              className="w-[20px] h-[10px] rounded-[2px] bg-[#612bd3]"
+              style={{ opacity: cellOpacity((peak * step) / 3, max) }}
+            />
+          ))}
+          <span className="tabular-nums">{peak.toLocaleString()}</span>
+        </div>
       </div>
     </div>
   );

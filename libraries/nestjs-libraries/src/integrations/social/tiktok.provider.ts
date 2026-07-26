@@ -971,7 +971,13 @@ export class TiktokProvider extends SocialAbstract implements SocialProvider {
       .map((video: any) => ({
         id: String(video.id),
         title: video.title || 'Untitled',
-        url: video.share_url,
+        // TikTok decorates share_url with its Open API attribution params
+        // (utm_campaign=tt4d_open_api & an app-identifying utm_source); the
+        // bare path opens the video identically.
+        url:
+          process.env.TIKTOK_ANALYTICS_CANONICAL_URL === 'true'
+            ? (video.share_url || '').split('?')[0]
+            : video.share_url,
         thumbnail: video.cover_image_url,
         // TikTok hands back seconds since epoch, not milliseconds.
         date: new Date((video.create_time || 0) * 1000).toISOString(),

@@ -132,6 +132,19 @@ export class YoutubeSettingsDto {
   @IsOptional()
   defaultLanguage?: string;
 
+  // Langue **parlée** de la vidéo, distincte de celle des métadonnées. Sans elle, YouTube
+  // ne sait pas à quel public proposer une version publiée en vidéo séparée : deux vidéos
+  // d'une même histoire, l'une en français l'autre en anglais, partiraient au même.
+  @IsString()
+  @IsOptional()
+  defaultAudioLanguage?: string;
+
+  // Playlist où ranger la vidéo après l'upload. C'est ce qui sépare les versions FR et EN
+  // sur une chaîne qui publie les deux.
+  @IsString()
+  @IsOptional()
+  playlistId?: string;
+
   @IsArray()
   @IsOptional()
   @ValidateNested({ each: true })

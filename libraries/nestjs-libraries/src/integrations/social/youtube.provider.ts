@@ -455,6 +455,11 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
               ...(settings?.defaultLanguage
                 ? { defaultLanguage: settings.defaultLanguage }
                 : {}),
+              // Langue parlée : c'est elle qui dit à YouTube à quel public proposer la
+              // vidéo. `defaultLanguage` ne décrit que le titre et la description.
+              ...(settings?.defaultAudioLanguage
+                ? { defaultAudioLanguage: settings.defaultAudioLanguage }
+                : {}),
             },
             status: {
               privacyStatus: settings.type,
@@ -506,6 +511,27 @@ export class YoutubeProvider extends SocialAbstract implements SocialProvider {
           }),
         true
       );
+    }
+
+    // Rangement en playlist : une chaîne qui publie la même histoire en deux langues sépare
+    // les versions par playlist. Un échec ici ne doit pas faire échouer la publication — la
+    // vidéo est en ligne, seul son rangement a manqué.
+    if (settings?.playlistId) {
+      try {
+        await this.runInConcurrent(async () =>
+          youtubeClient.playlistItems.insert({
+            part: ['snippet'],
+            requestBody: {
+              snippet: {
+                playlistId: settings.playlistId!,
+                resourceId: { kind: 'youtube#video', videoId: all?.data?.id! },
+              },
+            },
+          })
+        );
+      } catch (err) {
+        console.error('youtube: playlistItems.insert failed', err);
+      }
     }
 
     if (settings?.captions?.length) {

@@ -591,10 +591,19 @@ export class IntegrationService {
     timezone?: number,
     customInstanceDetails?: string
   ) {
+    // L'avatar d'un canal est cosmétique : quand le fournisseur sert une URL périmée ou
+    // une page d'erreur, `uploadSimple` lève « Unsupported file type » et faisait tomber
+    // tout ce qui passe par ici — jusqu'à l'écran d'analytics, qui rafraîchit les jetons
+    // et donc réenregistre les canaux (constaté le 28/07 : /analytics en erreur, un
+    // `Unsupported file type` toutes les trois secondes dans les logs). On garde alors
+    // l'image précédente plutôt que de perdre l'écran.
     const uploadedPicture = picture
       ? picture?.indexOf('imagedelivery.net') > -1
         ? picture
-        : await this.storage.uploadSimple(picture)
+        : await this.storage.uploadSimple(picture).catch((err) => {
+            console.error('integration: avatar non réenregistré', err?.message ?? err);
+            return undefined;
+          })
       : undefined;
 
     return this._integrationRepository.createOrUpdateIntegration(

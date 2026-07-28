@@ -259,7 +259,11 @@ export class IntegrationRepository {
       (params.picture.indexOf(process.env.CLOUDFLARE_BUCKET_URL!) === -1 ||
         params.picture.indexOf(process.env.FRONTEND_URL!) === -1)
     ) {
-      params.picture = await this.storage.uploadSimple(params.picture);
+      // Même raison qu'au-dessus : un avatar illisible ne doit pas faire échouer la mise
+      // à jour du canal. On garde celui déjà en base.
+      params.picture = await this.storage
+        .uploadSimple(params.picture)
+        .catch(() => undefined);
     }
 
     const existing = await this._integration.model.integration.findUnique({
